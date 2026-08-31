@@ -1,0 +1,37 @@
+bin
+tmp
+
+# 默认忽略所有点文件/目录，按需反忽略
+.*
+!.gitignore
+!.editorconfig
+!.golangci.yml
+!.ignore
+
+# 质量改进相关文件
+# 这些文件可以选择性地提交到版本控制
+
+# 覆盖率报告
+coverage.out
+coverage.html
+*.coverprofile
+
+# 测试输出
+*.test
+test-output/
+
+# IDE 文件
+.vscode/
+.idea/
+
+# 临时文件
+*.tmp
+*.swp
+*.swo
+*~
+
+# 日志文件
+*.log
+
+# local review drafts (not part of library API)
+docs/review/
