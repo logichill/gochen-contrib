@@ -206,15 +206,21 @@ func (m *model) Create(ctx context.Context, entities ...any) error {
 	if m.meta != nil && m.meta.Table != "" {
 		db = db.Table(m.meta.Table)
 	}
-	for _, entity := range entities {
-		if entity == nil {
-			continue
+	create := func(tx *gorm.DB) error {
+		for _, entity := range entities {
+			if entity == nil {
+				return errors.NewCode(errors.InvalidInput, "entity cannot be nil")
+			}
+			if err := tx.Create(entity).Error; err != nil {
+				return convertError(err)
+			}
 		}
-		if err := db.Create(entity).Error; err != nil {
-			return convertError(err)
-		}
+		return nil
 	}
-	return nil
+	if len(entities) == 1 {
+		return create(db)
+	}
+	return db.Transaction(create)
 }
 
 // Save 保存数据。
@@ -415,7 +421,7 @@ func (m *model) apply(ctx context.Context, opts ...orm.QueryOption) (*gorm.DB, e
 			db = db.Clauses(groupBy)
 		}
 	}
-	if len(qo.SelectRaw) > 0 {
+	if len(qo.Select) > 0 || len(qo.SelectRaw) > 0 {
 		selects := make([]string, 0, len(qo.Select)+len(qo.SelectRaw))
 		for _, selectColumn := range qo.Select {
 			selectColumn = strings.TrimSpace(selectColumn)
@@ -435,10 +441,12 @@ func (m *model) apply(ctx context.Context, opts ...orm.QueryOption) (*gorm.DB, e
 			selects = append(selects, selectExpr)
 		}
 		if len(selects) > 0 {
-			db = db.Select(strings.Join(selects, ", "))
+			if len(qo.SelectRaw) > 0 {
+				db = db.Select(strings.Join(selects, ", "))
+			} else {
+				db = db.Select(selects)
+			}
 		}
-	} else if len(qo.Select) > 0 {
-		db = db.Select(qo.Select)
 	}
 	if qo.Limit > 0 {
 		db = db.Limit(qo.Limit)
@@ -522,6 +530,9 @@ func ensureContext(ctx context.Context) context.Context {
 func convertError(err error) error {
 	if stdErrors.Is(err, gorm.ErrRecordNotFound) {
 		return errors.NewCode(errors.NotFound, "record not found")
+	}
+	if stdErrors.Is(err, gorm.ErrDuplicatedKey) || db.IsUniqueViolation(err) {
+		return errors.Wrap(err, errors.Conflict, "record already exists")
 	}
 	return err
 }
