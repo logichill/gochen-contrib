@@ -33,6 +33,7 @@
 | **HTTP** | `gochen-contrib/http/gin` | `gochen/httpx.IServer` | 基于 Gin 引擎实现标准 HTTP 服务容器，支持路由清单提取与无缝注入 `host.Run`。 |
 | **Database Drivers** | `gochen-contrib/data/db/driver` | `database/sql/driver` | 集中注册 MySQL (`go-sql-driver/mysql`)、PostgreSQL (`lib/pq`)、SQLite 驱动。 |
 | **Database** | `gochen-contrib/data/db/gorm` | `gochen/db.IDatabase` | 基于 GORM 提供最小 `IDatabase` 适配器（Query/Exec/Tx/Raw）。 |
+| **Database Factory** | `gochen-contrib/data/db/gorm/factory` | `gochen/db.IDatabase` | 可选的多驱动配置入口，提供 `NewFromConfig` / `NewFromDSN`。 |
 | **ORM** | `gochen-contrib/data/orm/gorm` | `gochen/db/orm.IOrm` | 基于 GORM 完整实现 `IOrm`、`IModel`，支持与 `ormrepo.NewRepo` 协同。 |
 | **Distributed Lock** | `gochen-contrib/lock/redis` | `gochen/process/lock.ILockProvider` | 基于 Redis 的安全分布式锁驱动（基于随机 Token 与原子 Lua 释放）。 |
 | **Migration** | `gochen-contrib/migration` | CLI & Drop & Runner | 封装通用交互确认 CLI、外键级联 Drop 以及多数据库驱动绑定。 |
@@ -43,7 +44,12 @@
 
 ## 快速使用示例
 
+已有 `*gorm.DB` 使用 `gormdb.New` 包装；显式选择驱动时使用 `gormdb.Open(ctx, dialector, cfg, opts...)`。需要按驱动名称选择 MySQL/PostgreSQL/SQLite 时，导入 `data/db/gorm/factory`，调用 `gormfactory.NewFromConfig` 或 `gormfactory.NewFromDSN`。日志与参数预算选项仍由 `gormdb` 提供。
+
 ### 1. 将 Gin 服务注入 Host
+
+Gin 适配器不支持 Runtime `middleware.Timeout` 的异步处理链：Gin 上下文会在请求返回后复用，组合使用会在执行 handler 前返回 `Unsupported`。需要该中间件时使用 Runtime nethttp。
+
 ```go
 import (
     gogin "gochen-contrib/http/gin"
