@@ -151,55 +151,10 @@ func (p *Provider) AcquireLease(ctx context.Context, key string) (lock.ILockLeas
 	}
 }
 
-type redisLockLease struct {
-	release func()
-	lost    chan error
-}
-
-func (l *redisLockLease) Release() {
-	if l == nil || l.release == nil {
-		return
-	}
-	l.release()
-}
-
-func (l *redisLockLease) Lost() <-chan error {
-	if l == nil {
-		ch := make(chan error)
-		close(ch)
-		return ch
-	}
-	return l.lost
-}
-
-type safeLostChan struct {
-	ch   chan<- error
-	once sync.Once
-}
-
-func (l *safeLostChan) close(err error) {
-	if l == nil || l.ch == nil {
-		return
-	}
-	l.once.Do(func() {
-		if err != nil {
-			select {
-			case l.ch <- err:
-			default:
-			}
-		}
-		close(l.ch)
-	})
-}
-
-func (p *Provider) newLease(redisKey string, token string) *redisLockLease {
-	lost := make(chan error, 1)
-	safeLost := &safeLostChan{ch: lost}
+func (p *Provider) newLease(redisKey string, token string) *lock.Lease {
+	safeLost := lock.NewSafeLostChan()
 	stopRenew := p.startRenewal(redisKey, token, safeLost)
-	return &redisLockLease{
-		lost:    lost,
-		release: p.releaseFunc(redisKey, token, stopRenew, safeLost),
-	}
+	return lock.NewLease(p.releaseFunc(redisKey, token, stopRenew, safeLost), safeLost.Channel())
 }
 
 var redisRenewLua = `
@@ -210,7 +165,7 @@ else
 end
 `
 
-func (p *Provider) startRenewal(redisKey string, token string, safeLost *safeLostChan) func() {
+func (p *Provider) startRenewal(redisKey string, token string, safeLost *lock.SafeLostChan) func() {
 	renewCtx, cancel := context.WithCancel(contextx.Background())
 	interval := p.ttl / 3
 	if interval <= 0 {
@@ -232,7 +187,7 @@ func (p *Provider) startRenewal(redisKey string, token string, safeLost *safeLos
 				if p.maxLeaseDuration > 0 && time.Since(startTime) >= p.maxLeaseDuration {
 					p.logger.Warn(contextx.Background(), "lock lease max duration reached, stopping renewal to prevent leak",
 						logging.String("redis_key", redisKey))
-					safeLost.close(errors.NewCode(errors.Timeout, "lock lease max duration reached"))
+					safeLost.Close(errors.NewCode(errors.Timeout, "lock lease max duration reached"))
 					return
 				}
 
@@ -246,14 +201,14 @@ func (p *Provider) startRenewal(redisKey string, token string, safeLost *safeLos
 					}
 					p.logger.Warn(contextx.Background(), "lock renewal failed",
 						logging.Error(err), logging.String("redis_key", redisKey))
-					safeLost.close(errors.Wrap(err, errors.Cache, "lock renewal failed"))
+					safeLost.Close(errors.Wrap(err, errors.Cache, "lock renewal failed"))
 					return
 				}
 
 				if n, ok := res.(int64); !ok || n == 0 {
 					p.logger.Warn(contextx.Background(), "lock renewal lost lease (token mismatch or expired)",
 						logging.String("redis_key", redisKey))
-					safeLost.close(errors.NewCode(errors.Conflict, "lock lease lost"))
+					safeLost.Close(errors.NewCode(errors.Conflict, "lock lease lost"))
 					return
 				}
 			}
@@ -272,7 +227,7 @@ end
 `
 
 // releaseFunc 处理releaseFunc。
-func (p *Provider) releaseFunc(redisKey string, token string, stopRenew func(), safeLost *safeLostChan) func() {
+func (p *Provider) releaseFunc(redisKey string, token string, stopRenew func(), safeLost *lock.SafeLostChan) func() {
 	releaseScript := redis.NewScript(redisReleaseLua)
 
 	var once sync.Once
@@ -282,7 +237,7 @@ func (p *Provider) releaseFunc(redisKey string, token string, stopRenew func(), 
 				stopRenew()
 			}
 			// 先关闭 lost 标记正常释放，防止停止续期协程并发上报假的 lost error
-			safeLost.close(nil)
+			safeLost.Close(nil)
 
 			ctx, cancel := context.WithTimeout(contextx.Background(), 5*time.Second)
 			defer cancel()

@@ -2,6 +2,7 @@ package gogin_test
 
 import (
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -126,6 +127,36 @@ func TestServerGroupSlashNormalizationConflict(t *testing.T) {
 	}
 	if conflicts[0].Path != "/api/users" || conflicts[0].Count != 2 {
 		t.Fatalf("unexpected conflict detail: %+v", conflicts[0])
+	}
+}
+
+func TestServerGroupEmptyAndTrailingSlashDistinct(t *testing.T) {
+	srv, err := gogin.New(&gochenhttp.WebConfig{Mode: "test"})
+	if err != nil {
+		t.Fatalf("new gin server: %v", err)
+	}
+	gSlash := srv.Group("/api/")
+	gSlash.GET("", func(ctx httpx.IContext) error { return ctx.String(200, "slash") })
+
+	gPlain := srv.Group("/api")
+	gPlain.GET("", func(ctx httpx.IContext) error { return ctx.String(200, "plain") })
+
+	conflicts := srv.RouteConflicts()
+	if len(conflicts) != 0 {
+		t.Fatalf("expected 0 conflicts for /api and /api/, got %+v", conflicts)
+	}
+
+	h := srv.Handler()
+	recSlash := httptest.NewRecorder()
+	h.ServeHTTP(recSlash, httptest.NewRequest("GET", "/api/", nil))
+	if recSlash.Code != 200 || recSlash.Body.String() != "slash" {
+		t.Fatalf("expected /api/ to return 200 slash, got status=%d body=%q", recSlash.Code, recSlash.Body.String())
+	}
+
+	recPlain := httptest.NewRecorder()
+	h.ServeHTTP(recPlain, httptest.NewRequest("GET", "/api", nil))
+	if recPlain.Code != 200 || recPlain.Body.String() != "plain" {
+		t.Fatalf("expected /api to return 200 plain, got status=%d body=%q", recPlain.Code, recPlain.Body.String())
 	}
 }
 

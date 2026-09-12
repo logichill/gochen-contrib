@@ -2,6 +2,7 @@ package gormorm
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	repopkg "gochen-runtime/db/orm/repo"
@@ -52,12 +53,21 @@ func setupDB(t *testing.T) *gorm.DB {
 	t.Helper()
 
 	db, err := gorm.Open(
-		gormsqlite.Open("file::memory:?cache=shared"),
+		gormsqlite.Open(fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())),
 		&gorm.Config{},
 	)
 	if err != nil {
 		t.Fatalf("gorm.Open: %v", err)
 	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatalf("gorm.DB: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := sqlDB.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 	if err := db.AutoMigrate(&user{}); err != nil {
 		t.Fatalf("AutoMigrate: %v", err)
 	}
@@ -110,6 +120,72 @@ func TestOrm_BasicCRUD(t *testing.T) {
 		t.Fatalf("expected not found")
 	} else if errors.Code(err) != errors.NotFound {
 		t.Fatalf("expected NOT_FOUND, got %v", err)
+	}
+}
+
+func TestOrm_UpdateValuesHonorsSelect(t *testing.T) {
+	for _, method := range []string{"UpdateValues", "UpdateValuesWithResult"} {
+		t.Run(method, func(t *testing.T) {
+			for _, tc := range []struct {
+				name        string
+				columns     []string
+				wantVersion uint64
+			}{
+				{"single", []string{"order"}, 7},
+				{"multiple", []string{"order", "version"}, 0},
+				{"unrestricted", nil, 0},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					db := setupDB(t)
+					if err := db.AutoMigrate(&reservedColumnEntity{}); err != nil {
+						t.Fatalf("AutoMigrate: %v", err)
+					}
+					rows := []reservedColumnEntity{
+						{ID: 1, Order: "before", Version: 7},
+						{ID: 2, Order: "untouched", Version: 9},
+					}
+					if err := db.Create(&rows).Error; err != nil {
+						t.Fatalf("Create: %v", err)
+					}
+					o, err := New(db)
+					if err != nil {
+						t.Fatalf("New: %v", err)
+					}
+					m, err := o.Model(&orm.ModelMeta{
+						Table:        "reserved_column_entities",
+						ModelFactory: orm.NewModelFactory[*reservedColumnEntity](),
+					})
+					if err != nil {
+						t.Fatalf("Model: %v", err)
+					}
+					opts := []orm.QueryOption{orm.WithWhere("id = ?", 1), orm.WithSelect(tc.columns...)}
+					values := map[string]any{"order": "after", "version": uint64(0)}
+					if method == "UpdateValuesWithResult" {
+						resultModel, ok := m.(orm.IModelWithResult)
+						if !ok {
+							t.Fatal("model does not expose result-aware writes")
+						}
+						result, err := resultModel.UpdateValuesWithResult(context.Background(), values, opts...)
+						if err != nil {
+							t.Fatalf("UpdateValuesWithResult: %v", err)
+						}
+						if affected, err := result.RowsAffected(); err != nil || affected != 1 {
+							t.Fatalf("RowsAffected = %d, %v; want 1", affected, err)
+						}
+					} else if err := m.UpdateValues(context.Background(), values, opts...); err != nil {
+						t.Fatalf("UpdateValues: %v", err)
+					}
+					var got []reservedColumnEntity
+					if err := db.Order("id").Find(&got).Error; err != nil {
+						t.Fatalf("Find updated rows: %v", err)
+					}
+					want := reservedColumnEntity{ID: 1, Order: "after", Version: tc.wantVersion}
+					if len(got) != 2 || got[0] != want || got[1] != rows[1] {
+						t.Fatalf("updated rows = %+v; want [%+v %+v]", got, want, rows[1])
+					}
+				})
+			}
+		})
 	}
 }
 
@@ -474,5 +550,131 @@ func TestOrm_NamingConvention(t *testing.T) {
 	nc := ncProvider.NamingConvention()
 	if nc.TenantColumn != "tenant_id" || nc.VersionColumn != "version" {
 		t.Fatalf("unexpected default naming convention: %+v", nc)
+	}
+}
+
+func TestOrm_JoinWithReservedTableAndMultipleOn(t *testing.T) {
+	db := setupDB(t)
+	// 创建保留字表 "group"
+	if err := db.Exec(`CREATE TABLE "group" (id INTEGER PRIMARY KEY, tenant_id INTEGER, name TEXT)`).Error; err != nil {
+		t.Fatalf("create group table: %v", err)
+	}
+	if err := db.Exec(`ALTER TABLE users ADD COLUMN tenant_id INTEGER`).Error; err != nil {
+		t.Fatalf("alter users table: %v", err)
+	}
+	if err := db.Exec(`INSERT INTO "group" (id, tenant_id, name) VALUES (1, 100, 'dev-group')`).Error; err != nil {
+		t.Fatalf("insert group: %v", err)
+	}
+	if err := db.Exec(`INSERT INTO users (id, name, tenant_id) VALUES (1, 'alice', 100)`).Error; err != nil {
+		t.Fatalf("insert user: %v", err)
+	}
+
+	o, err := New(db)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	m, err := o.Model(&orm.ModelMeta{Table: "users"})
+	if err != nil {
+		t.Fatalf("Model: %v", err)
+	}
+
+	var results []struct {
+		UserID    int64  `gorm:"column:id"`
+		UserName  string `gorm:"column:name"`
+		GroupName string `gorm:"column:group_name"`
+	}
+
+	// 测试：JOIN 保留字表 "group"，且包含多个 ON 条件（引用首个与后续条件），同时混合 SelectRaw
+	err = m.Find(context.Background(), &results,
+		orm.WithJoin(orm.Join{
+			Type:  orm.JoinLeft,
+			Table: "group",
+			On: []orm.JoinOn{
+				{Left: "users.id", Right: "group.id"},
+				{Left: "users.tenant_id", Right: "group.tenant_id"},
+			},
+		}),
+		orm.WithSelect("users.id", "users.name"),
+		orm.WithSelectExprUnsafe(`"group"."name" AS group_name`),
+	)
+	if err != nil {
+		t.Fatalf("Find with join on reserved table and multi-on: %v", err)
+	}
+	if len(results) != 1 || results[0].GroupName != "dev-group" {
+		t.Fatalf("unexpected join results: %+v", results)
+	}
+
+	// 测试：以保留字 "group" 作为主表 Model
+	gm, err := o.Model(&orm.ModelMeta{Table: "group"})
+	if err != nil {
+		t.Fatalf("Model with reserved table: %v", err)
+	}
+	var groupList []struct {
+		ID   int64  `gorm:"column:id"`
+		Name string `gorm:"column:name"`
+	}
+	if err := gm.Find(context.Background(), &groupList); err != nil {
+		t.Fatalf("Find on reserved primary table: %v", err)
+	}
+	if len(groupList) != 1 || groupList[0].Name != "dev-group" {
+		t.Fatalf("unexpected group list: %+v", groupList)
+	}
+}
+
+func TestOrm_CountContractBehavior(t *testing.T) {
+	db := setupDB(t)
+	if err := db.Exec(`ALTER TABLE users ADD COLUMN category TEXT`).Error; err != nil {
+		t.Fatalf("alter table: %v", err)
+	}
+	if err := db.Exec(`ALTER TABLE users ADD COLUMN nullable_note TEXT`).Error; err != nil {
+		t.Fatalf("alter table: %v", err)
+	}
+	// 插入 3 条数据，分属 2 个 category；其中部分列为 NULL
+	if err := db.Exec(`INSERT INTO users (id, name, category, nullable_note) VALUES (1, 'u1', 'cat-A', NULL)`).Error; err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+	if err := db.Exec(`INSERT INTO users (id, name, category, nullable_note) VALUES (2, 'u2', 'cat-A', 'note-2')`).Error; err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+	if err := db.Exec(`INSERT INTO users (id, name, category, nullable_note) VALUES (3, 'u3', 'cat-B', NULL)`).Error; err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+
+	o, err := New(db)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	m, err := o.Model(&orm.ModelMeta{Table: "users"})
+	if err != nil {
+		t.Fatalf("Model: %v", err)
+	}
+	ctx := context.Background()
+
+	// 1. 3 行数据加 Offset(1)，Count 仍必须返回 3（不受分页影响）
+	c1, err := m.Count(ctx, orm.WithOffset(1))
+	if err != nil {
+		t.Fatalf("Count with offset: %v", err)
+	}
+	if c1 != 3 {
+		t.Fatalf("Count with offset: got %d, want 3", c1)
+	}
+
+	// 2. 选择含 NULL 值的列，Count 仍返回全部 3 行
+	c2, err := m.Count(ctx, orm.WithSelect("nullable_note"))
+	if err != nil {
+		t.Fatalf("Count with nullable select: %v", err)
+	}
+	if c2 != 3 {
+		t.Fatalf("Count with nullable select: got %d, want 3", c2)
+	}
+
+	// 3. 2 个分组加 Limit(1)，Count 必须返回组数 2（不受 Limit(1) 影响）
+	c3, err := m.Count(ctx, orm.WithGroupBy("category"), orm.WithLimit(1))
+	if err != nil {
+		t.Fatalf("Count with groupby & limit: %v", err)
+	}
+	if c3 != 2 {
+		t.Fatalf("Count with groupby & limit: got %d, want 2", c3)
 	}
 }

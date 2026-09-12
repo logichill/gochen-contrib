@@ -127,49 +127,19 @@ func (s *Server) RouteConflicts() []httpx.RouteConflict {
 }
 
 func normalizeRoutePrefix(prefix string) string {
-	prefix = strings.TrimSpace(prefix)
-	if prefix == "" || prefix == "/" {
-		return ""
-	}
-	if !strings.HasPrefix(prefix, "/") {
-		prefix = "/" + prefix
-	}
-	return strings.TrimSuffix(prefix, "/")
+	return httpx.NormalizeRoutePrefix(prefix)
 }
 
 func normalizeRoutePath(path string) string {
-	path = strings.TrimSpace(path)
-	if path == "" {
-		return ""
-	}
-	if !strings.HasPrefix(path, "/") {
-		path = "/" + path
-	}
-	return path
+	return httpx.NormalizeRoutePath(path)
 }
 
 func joinRoutePrefix(parentPrefix string, childPrefix string) string {
-	parentPrefix = normalizeRoutePrefix(parentPrefix)
-	childPrefix = normalizeRoutePrefix(childPrefix)
-	if parentPrefix == "" {
-		return childPrefix
-	}
-	if childPrefix == "" {
-		return parentPrefix
-	}
-	return parentPrefix + childPrefix
+	return httpx.JoinRoutePrefix(parentPrefix, childPrefix)
 }
 
 func joinRoutePath(prefix string, path string) string {
-	prefix = normalizeRoutePrefix(prefix)
-	path = normalizeRoutePath(path)
-	if prefix == "" {
-		return path
-	}
-	if path == "" || path == "/" {
-		return prefix
-	}
-	return prefix + path
+	return httpx.JoinRoutePath(prefix, path)
 }
 
 var _ httpx.IServer = (*Server)(nil)

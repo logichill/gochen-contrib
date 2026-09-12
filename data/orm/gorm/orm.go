@@ -162,7 +162,7 @@ func (m *model) Dialect() dialect.IDialect {
 
 // First 处理First。
 func (m *model) First(ctx context.Context, dest any, opts ...orm.QueryOption) error {
-	db, err := m.apply(ctx, opts...)
+	db, err := m.apply(ctx, orm.CollectQueryOptions(opts...))
 	if err != nil {
 		return err
 	}
@@ -174,7 +174,7 @@ func (m *model) First(ctx context.Context, dest any, opts ...orm.QueryOption) er
 
 // Find 查找数据。
 func (m *model) Find(ctx context.Context, dest any, opts ...orm.QueryOption) error {
-	db, err := m.apply(ctx, opts...)
+	db, err := m.apply(ctx, orm.CollectQueryOptions(opts...))
 	if err != nil {
 		return err
 	}
@@ -185,13 +185,38 @@ func (m *model) Find(ctx context.Context, dest any, opts ...orm.QueryOption) err
 }
 
 // Count 统计数据。
+//
+// 契约实现规范：
+// - 忽略 Limit 和 Offset，返回不受分页影响的匹配记录总数或组数；
+// - 忽略 Select 投影与 OrderBy，避免因特定列为 NULL 或排序开销影响统计结果；
+// - 当指定 GroupBy 时，以子查询形式统计满足分组条件的组数（Number of groups）。
 func (m *model) Count(ctx context.Context, opts ...orm.QueryOption) (int64, error) {
-	db, err := m.apply(ctx, opts...)
+	qo := orm.CollectQueryOptions(opts...)
+	if len(qo.GroupBy) > 0 {
+		subQuery, err := m.apply(ctx, orm.QueryOptions{
+			Where:   qo.Where,
+			Joins:   qo.Joins,
+			GroupBy: qo.GroupBy,
+		})
+		if err != nil {
+			return 0, err
+		}
+		var count int64
+		if err := m.db.WithContext(ensureContext(ctx)).Table("(?) AS _gochen_count", subQuery.Select("1")).Count(&count).Error; err != nil {
+			return 0, convertError(err)
+		}
+		return count, nil
+	}
+
+	db, err := m.apply(ctx, orm.QueryOptions{
+		Where: qo.Where,
+		Joins: qo.Joins,
+	})
 	if err != nil {
 		return 0, err
 	}
 	var count int64
-	if err := db.Count(&count).Error; err != nil {
+	if err := db.Select("*").Count(&count).Error; err != nil {
 		return 0, convertError(err)
 	}
 	return count, nil
@@ -225,7 +250,7 @@ func (m *model) Create(ctx context.Context, entities ...any) error {
 
 // Save 保存数据。
 func (m *model) Save(ctx context.Context, entity any, opts ...orm.QueryOption) error {
-	db, err := m.apply(ctx, opts...)
+	db, err := m.apply(ctx, orm.CollectQueryOptions(opts...))
 	if err != nil {
 		return err
 	}
@@ -237,7 +262,7 @@ func (m *model) Save(ctx context.Context, entity any, opts ...orm.QueryOption) e
 
 // SaveWithResult 保存带结果。
 func (m *model) SaveWithResult(ctx context.Context, entity any, opts ...orm.QueryOption) (sql.Result, error) {
-	db, err := m.apply(ctx, opts...)
+	db, err := m.apply(ctx, orm.CollectQueryOptions(opts...))
 	if err != nil {
 		return nil, err
 	}
@@ -250,7 +275,7 @@ func (m *model) SaveWithResult(ctx context.Context, entity any, opts ...orm.Quer
 
 // UpdateValues 更新值集合。
 func (m *model) UpdateValues(ctx context.Context, values map[string]any, opts ...orm.QueryOption) error {
-	db, err := m.apply(ctx, opts...)
+	db, err := m.apply(ctx, orm.CollectQueryOptions(opts...))
 	if err != nil {
 		return err
 	}
@@ -262,7 +287,7 @@ func (m *model) UpdateValues(ctx context.Context, values map[string]any, opts ..
 
 // UpdateValuesWithResult 更新值集合并带结果。
 func (m *model) UpdateValuesWithResult(ctx context.Context, values map[string]any, opts ...orm.QueryOption) (sql.Result, error) {
-	db, err := m.apply(ctx, opts...)
+	db, err := m.apply(ctx, orm.CollectQueryOptions(opts...))
 	if err != nil {
 		return nil, err
 	}
@@ -275,7 +300,7 @@ func (m *model) UpdateValuesWithResult(ctx context.Context, values map[string]an
 
 // Delete 删除数据。
 func (m *model) Delete(ctx context.Context, opts ...orm.QueryOption) error {
-	db, err := m.apply(ctx, opts...)
+	db, err := m.apply(ctx, orm.CollectQueryOptions(opts...))
 	if err != nil {
 		return err
 	}
@@ -294,7 +319,7 @@ func (m *model) Delete(ctx context.Context, opts ...orm.QueryOption) error {
 
 // DeleteWithResult 删除数据。
 func (m *model) DeleteWithResult(ctx context.Context, opts ...orm.QueryOption) (sql.Result, error) {
-	db, err := m.apply(ctx, opts...)
+	db, err := m.apply(ctx, orm.CollectQueryOptions(opts...))
 	if err != nil {
 		return nil, err
 	}
@@ -362,7 +387,7 @@ func (a *association) Clear(ctx context.Context) error {
 }
 
 // apply 应用配置。
-func (m *model) apply(ctx context.Context, opts ...orm.QueryOption) (*gorm.DB, error) {
+func (m *model) apply(ctx context.Context, qo orm.QueryOptions) (*gorm.DB, error) {
 	db := m.db.WithContext(ensureContext(ctx))
 	if m.meta != nil {
 		// 优先使用显式 Table，避免将 model 实例引入 GORM 的隐式主键 WHERE 推导。
@@ -373,13 +398,13 @@ func (m *model) apply(ctx context.Context, opts ...orm.QueryOption) (*gorm.DB, e
 			db = db.Model(model)
 		}
 	}
-	qo := orm.CollectQueryOptions(opts...)
 
 	for _, cond := range qo.Where {
 		db = db.Where(cond.Expr, cond.Args...)
 	}
+	d := m.Dialect()
 	for _, join := range qo.Joins {
-		expr, err := buildJoinExpr(join)
+		expr, err := buildJoinExpr(d, join)
 		if err != nil {
 			return nil, err
 		}
@@ -423,6 +448,7 @@ func (m *model) apply(ctx context.Context, opts ...orm.QueryOption) (*gorm.DB, e
 	}
 	if len(qo.Select) > 0 || len(qo.SelectRaw) > 0 {
 		selects := make([]string, 0, len(qo.Select)+len(qo.SelectRaw))
+		columns := make([]clause.Column, 0, len(qo.Select)+len(qo.SelectRaw))
 		for _, selectColumn := range qo.Select {
 			selectColumn = strings.TrimSpace(selectColumn)
 			if selectColumn == "" {
@@ -432,6 +458,7 @@ func (m *model) apply(ctx context.Context, opts ...orm.QueryOption) (*gorm.DB, e
 				return nil, errors.NewCode(errors.InvalidInput, "unsafe select column").WithContext("column", selectColumn)
 			}
 			selects = append(selects, selectColumn)
+			columns = append(columns, clause.Column{Name: selectColumn, Raw: selectColumn == "*"})
 		}
 		for _, selectExpr := range qo.SelectRaw {
 			selectExpr = strings.TrimSpace(selectExpr)
@@ -439,13 +466,11 @@ func (m *model) apply(ctx context.Context, opts ...orm.QueryOption) (*gorm.DB, e
 				continue
 			}
 			selects = append(selects, selectExpr)
+			columns = append(columns, clause.Column{Name: selectExpr, Raw: true})
 		}
 		if len(selects) > 0 {
-			if len(qo.SelectRaw) > 0 {
-				db = db.Select(strings.Join(selects, ", "))
-			} else {
-				db = db.Select(selects)
-			}
+			// 更新操作依赖原始字段列表；查询投影通过 SELECT 子句处理标识符引用。
+			db = db.Select(selects).Clauses(clause.Select{Distinct: db.Statement.Distinct, Columns: columns})
 		}
 	}
 	if qo.Limit > 0 {
@@ -461,15 +486,17 @@ func (m *model) apply(ctx context.Context, opts ...orm.QueryOption) (*gorm.DB, e
 }
 
 // buildJoinExpr 构造JoinExpr。
-func buildJoinExpr(j orm.Join) (string, error) {
-	joinType := strings.TrimSpace(string(j.Type))
-	if joinType == "" {
-		joinType = string(orm.JoinInner)
-	}
-	switch orm.JoinType(joinType) {
-	case orm.JoinInner, orm.JoinLeft, orm.JoinRight:
+func buildJoinExpr(d dialect.IDialect, j orm.Join) (string, error) {
+	var joinType string
+	switch j.Type {
+	case orm.JoinInner:
+		joinType = "INNER"
+	case orm.JoinLeft:
+		joinType = "LEFT"
+	case orm.JoinRight:
+		joinType = "RIGHT"
 	default:
-		return "", errors.NewCode(errors.InvalidInput, "unsupported join type").WithContext("join_type", joinType)
+		return "", errors.NewCode(errors.InvalidInput, "invalid join type").WithContext("type", string(j.Type))
 	}
 
 	table := strings.TrimSpace(j.Table)
@@ -482,7 +509,7 @@ func buildJoinExpr(j orm.Join) (string, error) {
 	alias := strings.TrimSpace(j.Alias)
 	if alias != "" {
 		if strings.Contains(alias, ".") {
-			return "", errors.NewCode(errors.InvalidInput, "unsafe join alias").WithContext("alias", alias)
+			return "", errors.NewCode(errors.InvalidInput, "join alias cannot contain dot").WithContext("alias", alias)
 		}
 		if !safeident.IsSafeIdentifier(alias) {
 			return "", errors.NewCode(errors.InvalidInput, "unsafe join alias").WithContext("alias", alias)
@@ -492,6 +519,7 @@ func buildJoinExpr(j orm.Join) (string, error) {
 	if len(j.On) == 0 {
 		return "", errors.NewCode(errors.InvalidInput, "join on cannot be empty").WithContext("table", table)
 	}
+	conditions := make([]string, 0, len(j.On))
 	for i := range j.On {
 		left := strings.TrimSpace(j.On[i].Left)
 		right := strings.TrimSpace(j.On[i].Right)
@@ -504,18 +532,15 @@ func buildJoinExpr(j orm.Join) (string, error) {
 		if !safeident.IsSafeIdentifier(right) {
 			return "", errors.NewCode(errors.InvalidInput, "unsafe join on right").WithContext("right", right)
 		}
+		conditions = append(conditions, d.QuoteIdentifier(left)+" = "+d.QuoteIdentifier(right))
 	}
 
-	target := table
+	target := d.QuoteIdentifier(table)
 	if alias != "" {
-		target = fmt.Sprintf("%s AS %s", table, alias)
+		target = fmt.Sprintf("%s AS %s", d.QuoteIdentifier(table), d.QuoteIdentifier(alias))
 	}
 
-	expr := fmt.Sprintf("%s JOIN %s ON %s = %s", joinType, target, j.On[0].Left, j.On[0].Right)
-	for i := 1; i < len(j.On); i++ {
-		expr += fmt.Sprintf(" AND %s = %s", j.On[i].Left, j.On[i].Right)
-	}
-	return expr, nil
+	return fmt.Sprintf("%s JOIN %s ON %s", joinType, target, strings.Join(conditions, " AND ")), nil
 }
 
 // ensureContext 确保上下文。

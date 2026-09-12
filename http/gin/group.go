@@ -1,6 +1,9 @@
 package gogin
 
 import (
+	stdpath "path"
+	"strings"
+
 	"gochen/httpx"
 
 	"github.com/gin-gonic/gin"
@@ -13,8 +16,25 @@ type routeGroup struct {
 	prefix string
 }
 
+func calculateGinPath(basePath, relativePath string) string {
+	if relativePath == "" {
+		if basePath == "" {
+			return "/"
+		}
+		return basePath
+	}
+	finalPath := stdpath.Clean(basePath + "/" + relativePath)
+	if strings.HasSuffix(relativePath, "/") && !strings.HasSuffix(finalPath, "/") {
+		finalPath += "/"
+	}
+	if !strings.HasPrefix(finalPath, "/") {
+		finalPath = "/" + finalPath
+	}
+	return finalPath
+}
+
 func (g *routeGroup) registerRoute(method, path string, handler httpx.Handler) {
-	fullPath := joinRoutePath(g.prefix, path)
+	fullPath := calculateGinPath(g.group.BasePath(), path)
 	if g.server.reg.tryReserve(method, fullPath) {
 		return
 	}
