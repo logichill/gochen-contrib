@@ -23,7 +23,7 @@ DB_SSL_KEY=/path/to/client-key.pem
 ```go
 import (
     "gochen/db"
-    gormdb "gochen-contrib/data/db/gorm"
+    gormfactory "gochen-contrib/data/db/gorm/factory"
 )
 
 // 方式 1: 使用 Options 字段
@@ -42,7 +42,7 @@ cfg := db.DBConfig{
     },
 }
 
-database, err := gormdb.NewFromConfig(ctx, cfg)
+database, err := gormfactory.NewFromConfig(ctx, cfg)
 if err != nil {
     log.Fatal(err)
 }
