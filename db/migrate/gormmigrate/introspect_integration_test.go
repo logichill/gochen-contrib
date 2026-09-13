@@ -1,4 +1,6 @@
-package gormorm
+//go:build integration
+
+package gormmigrate
 
 import (
 	"context"

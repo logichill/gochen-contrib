@@ -35,6 +35,7 @@
 | **Database** | `gochen-contrib/data/db/gorm` | `gochen/db.IDatabase` | 基于 GORM 提供最小 `IDatabase` 适配器（Query/Exec/Tx/Raw）。 |
 | **Database Factory** | `gochen-contrib/data/db/gorm/factory` | `gochen/db.IDatabase` | 可选的多驱动配置入口，提供 `NewFromConfig` / `NewFromDSN`。 |
 | **ORM** | `gochen-contrib/data/orm/gorm` | `gochen/db/orm.IOrm` | 基于 GORM 完整实现 `IOrm`、`IModel`，支持与 `ormrepo.NewRepo` 协同。 |
+| **Migration Tools** | `gochen-contrib/db/migrate/gormmigrate` | Schema / Migration Draft | 基于 GORM 模型的 schema AST 解析、迁移草稿生成与 AutoMigrate 工具。 |
 | **Distributed Lock** | `gochen-contrib/lock/redis` | `gochen/process/lock.ILockProvider` | 基于 Redis 的安全分布式锁驱动（基于随机 Token 与原子 Lua 释放）。 |
 | **Migration** | `gochen-contrib/migration` | CLI & Drop & Runner | 封装通用交互确认 CLI、外键级联 Drop 以及多数据库驱动绑定。 |
 | **Tracing** | `gochen-contrib/observe/otel` | `gochen/observe.ITracer` | OpenTelemetry 分布式链路追踪导出与上下文传播适配器。 |
@@ -93,5 +94,10 @@ repo, err := ormrepo.NewRepo[*Order, int64](ormAdapter, "orders")
 
 ```bash
 # 运行全量单元测试
-go test ./... -count=1
+GOWORK=off go test ./... -count=1
+
+# 运行 GORM Schema 的真实数据库集成测试
+GOWORK=off go test -tags=integration -count=1 ./db/migrate/gormmigrate
 ```
+
+集成测试分别通过 `GOCHEN_MYSQL_DSN`、`GOCHEN_POSTGRES_DSN` 连接测试数据库，创建并清理独立的测试表；未设置对应环境变量时跳过该数据库的用例。

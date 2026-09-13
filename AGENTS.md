@@ -30,9 +30,9 @@
 
 ## 顶级目录与包
 
-`data/db/driver data/db/gorm data/db/gorm/factory data/orm/gorm http/gin lock/redis migration observe/otel observe/prometheus`
+`data/db/driver data/db/gorm data/db/gorm/factory data/orm/gorm db/migrate/gormmigrate http/gin lock/redis migration observe/otel observe/prometheus`
 
-`data/db/gorm` 只适配 GORM 连接或接受显式注入的 Dialector；`data/db/gorm/factory` 独立承载按配置选择 MySQL/PostgreSQL/SQLite 驱动的便捷入口，避免包装已有连接时强制引入全部驱动。
+`data/db/gorm` 只适配 GORM 连接或接受显式注入的 Dialector；`data/db/gorm/factory` 独立承载按配置选择 MySQL/PostgreSQL/SQLite 驱动的便捷入口，避免包装已有连接时强制引入全部驱动；`db/migrate/gormmigrate` 承载基于 GORM 模型的 schema 解析、迁移草稿生成与 AutoMigrate 工具能力，与在线 ORM 查询解耦。
 
 新增目录必须先说明架构理由。
 
