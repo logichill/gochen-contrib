@@ -25,7 +25,7 @@ func newRouteRegistry() *routeRegistry {
 
 func (r *routeRegistry) tryReserve(method, path string) bool {
 	method = strings.TrimSpace(strings.ToUpper(method))
-	path = normalizeRoutePath(path)
+	path = httpx.NormalizeRoutePath(path)
 	if method == "" || path == "" {
 		return false
 	}
@@ -42,7 +42,7 @@ func (r *routeRegistry) tryReserve(method, path string) bool {
 
 func (r *routeRegistry) rollback(method, path string) {
 	method = strings.TrimSpace(strings.ToUpper(method))
-	path = normalizeRoutePath(path)
+	path = httpx.NormalizeRoutePath(path)
 	if method == "" || path == "" {
 		return
 	}
@@ -58,7 +58,7 @@ func (r *routeRegistry) rollback(method, path string) {
 
 func (r *routeRegistry) markConflict(method, path string) {
 	method = strings.TrimSpace(strings.ToUpper(method))
-	path = normalizeRoutePath(path)
+	path = httpx.NormalizeRoutePath(path)
 	if method == "" || path == "" {
 		return
 	}
@@ -124,22 +124,6 @@ func (s *Server) RouteConflicts() []httpx.RouteConflict {
 		return nil
 	}
 	return s.reg.conflicts()
-}
-
-func normalizeRoutePrefix(prefix string) string {
-	return httpx.NormalizeRoutePrefix(prefix)
-}
-
-func normalizeRoutePath(path string) string {
-	return httpx.NormalizeRoutePath(path)
-}
-
-func joinRoutePrefix(parentPrefix string, childPrefix string) string {
-	return httpx.JoinRoutePrefix(parentPrefix, childPrefix)
-}
-
-func joinRoutePath(prefix string, path string) string {
-	return httpx.JoinRoutePath(prefix, path)
 }
 
 var _ httpx.IServer = (*Server)(nil)

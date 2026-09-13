@@ -8,6 +8,7 @@ import (
 	repopkg "gochen-runtime/db/orm/repo"
 	"gochen/app/query"
 	"gochen/contextx"
+	"gochen/db"
 	"gochen/db/orm"
 	"gochen/errors"
 
@@ -536,15 +537,15 @@ func TestBeginTxSession_DatabaseCloseDoesNotCloseRootDB(t *testing.T) {
 }
 
 func TestOrm_NamingConvention(t *testing.T) {
-	db := setupDB(t)
-	o, err := New(db)
+	gdb := setupDB(t)
+	o, err := New(gdb)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
 
-	ncProvider, ok := any(o).(orm.INamingConventionProvider)
+	ncProvider, ok := any(o).(db.INamingConventionProvider)
 	if !ok {
-		t.Fatal("expected Orm to implement orm.INamingConventionProvider")
+		t.Fatal("expected Orm to implement db.INamingConventionProvider")
 	}
 
 	nc := ncProvider.NamingConvention()

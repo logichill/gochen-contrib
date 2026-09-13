@@ -5,7 +5,7 @@ import (
 )
 
 func (s *Server) registerRoute(method, path string, handler httpx.Handler) {
-	normPath := normalizeRoutePath(path)
+	normPath := httpx.NormalizeRoutePath(path)
 	if s.reg.tryReserve(method, normPath) {
 		return
 	}
@@ -72,7 +72,7 @@ func (s *Server) OPTIONS(path string, handler httpx.Handler) httpx.IServer {
 // Group 创建继承当前中间件的路由组。
 func (s *Server) Group(prefix string) httpx.IRouteGroup {
 	group := s.engine.Group(prefix)
-	return &routeGroup{group: group, server: s, prefix: normalizeRoutePrefix(prefix)}
+	return &routeGroup{group: group, server: s, prefix: httpx.NormalizeRoutePrefix(prefix)}
 }
 
 // Use 追加 Gin 全局中间件，覆盖后续路由注册以及 NoRoute/NoMethod。

@@ -101,7 +101,7 @@ func (g *routeGroup) OPTIONS(path string, handler httpx.Handler) httpx.IRouteGro
 // Group 创建继承当前前缀和中间件的子组。
 func (g *routeGroup) Group(prefix string) httpx.IRouteGroup {
 	subGroup := g.group.Group(prefix)
-	return &routeGroup{group: subGroup, server: g.server, prefix: joinRoutePrefix(g.prefix, prefix)}
+	return &routeGroup{group: subGroup, server: g.server, prefix: httpx.JoinRoutePrefix(g.prefix, prefix)}
 }
 
 // Use 为本组后续注册的路由追加中间件。
