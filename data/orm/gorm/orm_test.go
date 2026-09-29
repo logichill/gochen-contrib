@@ -536,6 +536,61 @@ func TestBeginTxSession_DatabaseCloseDoesNotCloseRootDB(t *testing.T) {
 	}
 }
 
+func TestBeginTxSession_BorrowedViewCloseKeepsCommitCallbacks(t *testing.T) {
+	db := setupDB(t)
+	o, err := New(db)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	session, err := o.BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("BeginTx: %v", err)
+	}
+	borrowed := session.Database()
+	if borrowed == nil {
+		t.Fatal("expected transaction session to expose database")
+	}
+
+	txCtx, err := orm.WithTxSession(context.Background(), session, true)
+	if err != nil {
+		t.Fatalf("WithTxSession: %v", err)
+	}
+	called := 0
+	if err := contextx.AppendAfterCommit(txCtx, func(context.Context) error {
+		called++
+		return nil
+	}); err != nil {
+		t.Fatalf("AppendAfterCommit: %v", err)
+	}
+
+	// 借用视图的 Close 为 no-op：外部事务不得被结束，提交回调也不得失效。
+	if err := borrowed.Close(); err != nil {
+		t.Fatalf("borrowed Close: %v", err)
+	}
+	if _, err := borrowed.Exec(context.Background(), "INSERT INTO users (name) VALUES (?)", "borrowed-after-close"); err != nil {
+		t.Fatalf("write after borrowed Close: %v", err)
+	}
+	if called != 0 {
+		t.Fatalf("after-commit callback ran before commit: %d", called)
+	}
+
+	if err := session.Commit(); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+	if called != 1 {
+		t.Fatalf("after-commit callback count = %d, want 1", called)
+	}
+
+	var count int64
+	if err := db.Model(&user{}).Where("name = ?", "borrowed-after-close").Count(&count).Error; err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("borrowed view write must survive external commit, got %d rows", count)
+	}
+}
+
 func TestOrm_NamingConvention(t *testing.T) {
 	gdb := setupDB(t)
 	o, err := New(gdb)

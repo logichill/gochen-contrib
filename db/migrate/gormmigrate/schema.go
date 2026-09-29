@@ -86,10 +86,10 @@ func convertGormSchema(parsed *gormschema.Schema, d dialect.IDialect) (dbschema.
 		}
 		columns := make([]string, 0, len(index.Fields))
 		for _, field := range index.Fields {
-			if field.Field == nil || field.Field.DBName == "" || field.Field.IgnoreMigration {
+			if field.Field == nil || field.DBName == "" || field.IgnoreMigration {
 				continue
 			}
-			columns = append(columns, field.Field.DBName)
+			columns = append(columns, field.DBName)
 		}
 		if len(columns) == 0 {
 			continue

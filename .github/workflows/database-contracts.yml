@@ -1,0 +1,81 @@
+name: Database contracts
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  savepoints:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - dialect: postgres
+            image: postgres:17.5-alpine
+            port: 5432
+            health: pg_isready -U gochen
+          - dialect: mysql
+            image: mysql:8.4
+            port: 3306
+            health: mysqladmin ping -h 127.0.0.1 -pgochen-test
+    services:
+      database:
+        image: ${{ matrix.image }}
+        env:
+          POSTGRES_USER: gochen
+          POSTGRES_PASSWORD: gochen-test
+          POSTGRES_DB: gochen_test
+          MYSQL_ROOT_PASSWORD: gochen-test
+          MYSQL_DATABASE: gochen_test
+        ports:
+          - ${{ matrix.port }}/tcp
+        options: >-
+          --health-cmd "${{ matrix.health }}"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    defaults:
+      run:
+        working-directory: gochen-contrib
+    env:
+      GOWORK: "off"
+      GOCHEN_REQUIRE_DATABASE_TESTS: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: gochen-contrib
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/gochen
+          ref: ${{ vars.GOCHEN_CORE_REF }}
+          path: gochen
+          token: ${{ secrets.GOCHEN_READ_TOKEN || github.token }}
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/gochen-runtime
+          ref: ${{ vars.GOCHEN_RUNTIME_REF }}
+          path: gochen-runtime
+          token: ${{ secrets.GOCHEN_READ_TOKEN || github.token }}
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: gochen-contrib/go.mod
+          cache-dependency-path: gochen-contrib/go.sum
+      - name: Verify savepoint and transaction contracts
+        env:
+          DATABASE_PORT: ${{ job.services.database.ports[matrix.port] }}
+          DATABASE_DIALECT: ${{ matrix.dialect }}
+        run: |
+          if [ "$DATABASE_DIALECT" = postgres ]; then
+            export GOCHEN_POSTGRES_DSN="host=127.0.0.1 port=$DATABASE_PORT user=gochen password=gochen-test dbname=gochen_test sslmode=disable"
+          else
+            export GOCHEN_MYSQL_DSN="root:gochen-test@tcp(127.0.0.1:$DATABASE_PORT)/gochen_test?parseTime=true"
+          fi
+          go test -race -count=1 -timeout=5m -v ./data/db/gorm -run "^TestExternalDialectSavepoints/$DATABASE_DIALECT$"

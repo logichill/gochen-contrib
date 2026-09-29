@@ -40,6 +40,9 @@ func New(db *gorm.DB, optFns ...Option) (*Database, error) {
 
 // Query 处理查询。
 func (g *Database) Query(ctx context.Context, query string, args ...any) (core.IRows, error) {
+	if ctx == nil {
+		return nil, errors.NewCode(errors.InvalidInput, "ctx is nil")
+	}
 	sqlRows, err := g.db.WithContext(ctx).Raw(query, args...).Rows()
 	if err != nil {
 		return nil, err
@@ -49,12 +52,21 @@ func (g *Database) Query(ctx context.Context, query string, args ...any) (core.I
 
 // QueryRow 处理查询行。
 func (g *Database) QueryRow(ctx context.Context, query string, args ...any) core.IRow {
-	sqlRow := g.db.WithContext(ctx).Raw(query, args...).Row()
-	return &dbRow{row: sqlRow}
+	if ctx == nil {
+		return &dbRow{err: errors.NewCode(errors.InvalidInput, "ctx is nil")}
+	}
+	if g == nil || g.db == nil {
+		return &dbRow{err: errors.NewCode(errors.InvalidInput, "database is nil")}
+	}
+	q := g.db.WithContext(ctx).Raw(query, args...)
+	return &dbRow{row: q.Row(), err: q.Error}
 }
 
 // Exec 处理Exec。
 func (g *Database) Exec(ctx context.Context, query string, args ...any) (sql.Result, error) {
+	if ctx == nil {
+		return nil, errors.NewCode(errors.InvalidInput, "ctx is nil")
+	}
 	res := g.db.WithContext(ctx).Exec(query, args...)
 	if res.Error != nil {
 		return nil, res.Error
@@ -67,15 +79,21 @@ func (g *Database) Begin(ctx context.Context) (core.ITransaction, error) { retur
 
 // BeginTx 处理Begin事务。
 func (g *Database) BeginTx(ctx context.Context, opts *sql.TxOptions) (core.ITransaction, error) {
+	if ctx == nil {
+		return nil, errors.NewCode(errors.InvalidInput, "ctx is nil")
+	}
 	tx := g.db.WithContext(ctx).Begin(opts)
 	if tx.Error != nil {
 		return nil, tx.Error
 	}
-	return &transaction{db: tx, maxBindParams: g.maxBindParams}, nil
+	return &transaction{db: tx, maxBindParams: g.maxBindParams, owned: true}, nil
 }
 
 // Ping 处理探测。
 func (g *Database) Ping(ctx context.Context) error {
+	if ctx == nil {
+		return errors.NewCode(errors.InvalidInput, "ctx is nil")
+	}
 	sqlDB, err := g.db.DB()
 	if err != nil {
 		return err
@@ -128,7 +146,7 @@ func dialectName(db *gorm.DB) string {
 	if db == nil || db.Dialector == nil {
 		return ""
 	}
-	return db.Dialector.Name()
+	return db.Name()
 }
 
 var _ core.IDatabase = (*Database)(nil)

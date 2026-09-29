@@ -36,7 +36,11 @@ func TestMySQLIntrospectorIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Inspect MySQL: %v", err)
 	}
-	table, ok := got.FindTable("", tableName)
+	var schemaName string
+	if err := database.QueryRow(context.Background(), "SELECT DATABASE()").Scan(&schemaName); err != nil {
+		t.Fatalf("query MySQL schema: %v", err)
+	}
+	table, ok := got.FindTable(schemaName, tableName)
 	if !ok {
 		t.Fatalf("expected table %s", tableName)
 	}
@@ -45,7 +49,7 @@ func TestMySQLIntrospectorIntegration(t *testing.T) {
 	}
 }
 
-func TestPostgresIntrospectorIntegrationSkipsExpressionIndexes(t *testing.T) {
+func TestPostgresIntrospectorIntegrationMarksExpressionIndexesUnsupported(t *testing.T) {
 	dsn := os.Getenv("GOCHEN_POSTGRES_DSN")
 	if dsn == "" {
 		t.Skip("set GOCHEN_POSTGRES_DSN to run Postgres introspection integration test")
@@ -65,15 +69,19 @@ func TestPostgresIntrospectorIntegrationSkipsExpressionIndexes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Inspect Postgres: %v", err)
 	}
-	table, ok := got.FindTable("", tableName)
+	var schemaName string
+	if err := database.QueryRow(context.Background(), "SELECT current_schema()").Scan(&schemaName); err != nil {
+		t.Fatalf("query PostgreSQL schema: %v", err)
+	}
+	table, ok := got.FindTable(schemaName, tableName)
 	if !ok {
 		t.Fatalf("expected table %s", tableName)
 	}
 	if _, ok := table.FindIndex(tableName + "_tenant_idx"); !ok {
 		t.Fatalf("expected simple tenant index, got %#v", table.Indexes)
 	}
-	if _, ok := table.FindIndex(tableName + "_mixed_expr_idx"); ok {
-		t.Fatalf("expected mixed expression index to be skipped, got %#v", table.Indexes)
+	if index, ok := table.FindIndex(tableName + "_mixed_expr_idx"); !ok || !index.Unsupported {
+		t.Fatalf("expected mixed expression index to be marked unsupported, got %#v", table.Indexes)
 	}
 }
 

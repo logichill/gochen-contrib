@@ -125,12 +125,15 @@ func PrintUsage(w io.Writer) {
   status             show current migration status for the selected type
   force <version>    force the selected type version and clear dirty state
   down               roll back all migrations for the selected type to version 0
-  drop               drop all non-system database tables
+  drop               drop all non-system database tables (not limited by -t/--type)
   help               show this help
 
 Migration type:
   The default type comes from Config.MigrationType, or "schema" when empty.
   Use -t <type> / --type <type> to run another safe migration namespace.
+  The type selects the migration namespace for up/status/force/down only.
+  It does not limit drop: drop removes every non-system table, including the
+  shared migration state table, regardless of the selected type.
 
 Examples:
   up

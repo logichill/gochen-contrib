@@ -95,7 +95,7 @@ func foreignKeyRestoreContext(ctx context.Context) (context.Context, context.Can
 	return context.WithTimeout(context.WithoutCancel(ctx), foreignKeyRestoreTimeout)
 }
 
-func listTables(ctx context.Context, database dropDatabase, d dialect.IDialect, excluded map[string]struct{}) ([]string, error) {
+func listTables(ctx context.Context, database dropDatabase, d dialect.IDialect, excluded map[string]struct{}) (tables []string, err error) {
 	var query string
 	switch d.Name() {
 	case dialect.NameSQLite:
@@ -111,8 +111,11 @@ func listTables(ctx context.Context, database dropDatabase, d dialect.IDialect, 
 	if err != nil {
 		return nil, errors.Wrap(err, errors.Database, "list database tables failed")
 	}
-	defer rows.Close()
-	var tables []string
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil {
+			err = errors.Join(err, errors.Wrap(closeErr, errors.Database, "close database tables rows failed"))
+		}
+	}()
 	for rows.Next() {
 		var table string
 		if err := rows.Scan(&table); err != nil {

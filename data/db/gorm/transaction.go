@@ -16,6 +16,7 @@ import (
 type transaction struct {
 	db            *gorm.DB
 	maxBindParams int
+	owned         bool
 }
 
 // NewTransactionDatabase 返回绑定到既有 GORM 事务的数据库适配器。
@@ -35,11 +36,17 @@ func NewTransactionDatabase(tx *gorm.DB, optFns ...Option) core.IDatabase {
 	if err := dialect.ValidateMaxBindParameters(maxBind); err != nil {
 		maxBind = dialect.DefaultMaxBindParameters
 	}
-	return &transaction{db: tx, maxBindParams: maxBind}
+	return &transaction{db: tx, maxBindParams: maxBind, owned: false}
 }
 
 // Query 处理查询。
 func (t *transaction) Query(ctx context.Context, query string, args ...any) (core.IRows, error) {
+	if ctx == nil {
+		return nil, errors.NewCode(errors.InvalidInput, "ctx is nil")
+	}
+	if t == nil || t.db == nil {
+		return nil, errors.NewCode(errors.InvalidInput, "transaction is nil")
+	}
 	sqlRows, err := t.db.WithContext(ctx).Raw(query, args...).Rows()
 	if err != nil {
 		return nil, err
@@ -49,12 +56,24 @@ func (t *transaction) Query(ctx context.Context, query string, args ...any) (cor
 
 // QueryRow 处理查询行。
 func (t *transaction) QueryRow(ctx context.Context, query string, args ...any) core.IRow {
-	sqlRow := t.db.WithContext(ctx).Raw(query, args...).Row()
-	return &dbRow{row: sqlRow}
+	if ctx == nil {
+		return &dbRow{err: errors.NewCode(errors.InvalidInput, "ctx is nil")}
+	}
+	if t == nil || t.db == nil {
+		return &dbRow{err: errors.NewCode(errors.InvalidInput, "transaction is nil")}
+	}
+	q := t.db.WithContext(ctx).Raw(query, args...)
+	return &dbRow{row: q.Row(), err: q.Error}
 }
 
 // Exec 处理Exec。
 func (t *transaction) Exec(ctx context.Context, query string, args ...any) (sql.Result, error) {
+	if ctx == nil {
+		return nil, errors.NewCode(errors.InvalidInput, "ctx is nil")
+	}
+	if t == nil || t.db == nil {
+		return nil, errors.NewCode(errors.InvalidInput, "transaction is nil")
+	}
 	res := t.db.WithContext(ctx).Exec(query, args...)
 	if res.Error != nil {
 		return nil, res.Error
@@ -64,21 +83,49 @@ func (t *transaction) Exec(ctx context.Context, query string, args ...any) (sql.
 
 // Begin 处理Begin。
 func (t *transaction) Begin(ctx context.Context) (core.ITransaction, error) {
+	if ctx == nil {
+		return nil, errors.NewCode(errors.InvalidInput, "ctx is nil")
+	}
 	return nil, errors.NewCode(errors.Unsupported, "nested transactions are not supported")
 }
 
 // BeginTx 处理Begin事务。
 func (t *transaction) BeginTx(ctx context.Context, opts *sql.TxOptions) (core.ITransaction, error) {
-	_ = ctx
+	if ctx == nil {
+		return nil, errors.NewCode(errors.InvalidInput, "ctx is nil")
+	}
 	_ = opts
 	return nil, errors.NewCode(errors.Unsupported, "nested transactions are not supported")
 }
 
 // Ping 处理探测。
-func (t *transaction) Ping(ctx context.Context) error { return nil }
+func (t *transaction) Ping(ctx context.Context) error {
+	if ctx == nil {
+		return errors.NewCode(errors.InvalidInput, "ctx is nil")
+	}
+	return nil
+}
 
 // Close 关闭当前资源。
-func (t *transaction) Close() error { return nil }
+func (t *transaction) Close() error {
+	if t == nil || !t.owned || t.db == nil {
+		return nil
+	}
+	if err := t.controlDB().Rollback().Error; err != nil && !errors.Is(err, sql.ErrTxDone) {
+		return err
+	}
+	return nil
+}
+
+// controlDB 返回只用于事务控制的临时句柄。
+//
+// GORM 的 Commit/Rollback 会通过 AddError 修改 *gorm.DB.Error。控制操作的
+// 错误不应污染事务句柄，否则后续 Close 或重试会被之前的错误阻断。
+func (t *transaction) controlDB() *gorm.DB {
+	db := t.db.Session(&gorm.Session{NewDB: true})
+	db.Error = nil
+	return db
+}
 
 // GormDB 返回事务绑定的底层 GORM 连接，仅供适配层使用。
 func (t *transaction) GormDB() *gorm.DB {
@@ -117,10 +164,17 @@ func (t *transaction) CreateSavepoint(ctx context.Context, name string) error {
 	if t == nil || t.db == nil {
 		return errors.NewCode(errors.InvalidInput, "transaction is nil")
 	}
-	if err := validateSavepointName(name); err != nil {
+	normalizedName, err := normalizeSavepointName(name)
+	if err != nil {
 		return err
 	}
-	return t.db.WithContext(ctx).SavePoint(name).Error
+	if ctx == nil {
+		return errors.NewCode(errors.InvalidInput, "ctx is nil")
+	}
+	if !t.SupportsSavepoints() {
+		return t.db.WithContext(ctx).SavePoint(normalizedName).Error
+	}
+	return t.db.WithContext(ctx).Exec("SAVEPOINT " + normalizedName).Error
 }
 
 // RollbackToSavepoint 回滚到指定 savepoint。
@@ -128,10 +182,17 @@ func (t *transaction) RollbackToSavepoint(ctx context.Context, name string) erro
 	if t == nil || t.db == nil {
 		return errors.NewCode(errors.InvalidInput, "transaction is nil")
 	}
-	if err := validateSavepointName(name); err != nil {
+	normalizedName, err := normalizeSavepointName(name)
+	if err != nil {
 		return err
 	}
-	return t.db.WithContext(ctx).RollbackTo(name).Error
+	if ctx == nil {
+		return errors.NewCode(errors.InvalidInput, "ctx is nil")
+	}
+	if !t.SupportsSavepoints() {
+		return t.db.WithContext(ctx).RollbackTo(normalizedName).Error
+	}
+	return t.db.WithContext(ctx).Exec("ROLLBACK TO SAVEPOINT " + normalizedName).Error
 }
 
 // ReleaseSavepoint 释放指定 savepoint。
@@ -139,33 +200,37 @@ func (t *transaction) ReleaseSavepoint(ctx context.Context, name string) error {
 	if t == nil || t.db == nil {
 		return errors.NewCode(errors.InvalidInput, "transaction is nil")
 	}
-	if err := validateSavepointName(name); err != nil {
+	normalizedName, err := normalizeSavepointName(name)
+	if err != nil {
 		return err
+	}
+	if ctx == nil {
+		return errors.NewCode(errors.InvalidInput, "ctx is nil")
 	}
 	dName := dialect.Name(t.DialectName())
 	switch dName {
 	case dialect.NamePostgres, dialect.NameSQLite, dialect.NameMySQL:
-		res := t.db.WithContext(ctx).Exec("RELEASE SAVEPOINT " + name)
+		res := t.db.WithContext(ctx).Exec("RELEASE SAVEPOINT " + normalizedName)
 		return res.Error
 	default:
 		return nil
 	}
 }
 
-func validateSavepointName(name string) error {
-	name = strings.TrimSpace(name)
-	if name == "" || strings.Contains(name, ".") || !safeident.IsSafeIdentifier(name) {
-		return errors.NewCode(errors.InvalidInput, "invalid savepoint name").
-			WithContext("savepoint", name)
+func normalizeSavepointName(name string) (string, error) {
+	normalized := strings.TrimSpace(name)
+	if normalized == "" || strings.Contains(normalized, ".") || !safeident.IsSafeIdentifier(normalized) {
+		return "", errors.NewCode(errors.InvalidInput, "invalid savepoint name").
+			WithContext("savepoint", normalized)
 	}
-	return nil
+	return normalized, nil
 }
 
 // Commit 提交当前事务。
-func (t *transaction) Commit() error { return t.db.Commit().Error }
+func (t *transaction) Commit() error { return t.controlDB().Commit().Error }
 
 // Rollback 回滚当前事务。
-func (t *transaction) Rollback() error { return t.db.Rollback().Error }
+func (t *transaction) Rollback() error { return t.controlDB().Rollback().Error }
 
 var _ core.ITransaction = (*transaction)(nil)
 var _ core.IDialectNameProvider = (*transaction)(nil)

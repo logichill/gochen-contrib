@@ -24,7 +24,7 @@ func TestAutoMigrate_RejectsNilDatabase(t *testing.T) {
 func TestAutoMigrate_Success(t *testing.T) {
 	database := openDraftDatabase(t)
 	// nil context 使用默认上下文，迁移结果应包含可读写的模型列。
-	if err := AutoMigrate(nil, database, &migrateTestEntity{}); err != nil {
+	if err := AutoMigrate(nil, database, &migrateTestEntity{}); err != nil { //nolint:staticcheck // nil is the contract regression case.
 		t.Fatalf("AutoMigrate failed: %v", err)
 	}
 	ctx := context.Background()

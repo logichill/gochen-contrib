@@ -26,13 +26,32 @@ func (r *dbRows) Columns() ([]string, error) { return r.rows.Columns() }
 // ColumnTypes 处理Column类型列表。
 func (r *dbRows) ColumnTypes() ([]*sql.ColumnType, error) { return r.rows.ColumnTypes() }
 
-type dbRow struct{ row *sql.Row }
+type dbRow struct {
+	row *sql.Row
+	err error
+}
 
 // Scan 把当前结果写入目标对象。
-func (r *dbRow) Scan(dest ...any) error { return r.row.Scan(dest...) }
+func (r *dbRow) Scan(dest ...any) error {
+	if r.err != nil {
+		return r.err
+	}
+	if r.row == nil {
+		return sql.ErrNoRows
+	}
+	return r.row.Scan(dest...)
+}
 
 // Err 处理Err。
-func (r *dbRow) Err() error { return r.row.Err() }
+func (r *dbRow) Err() error {
+	if r.err != nil {
+		return r.err
+	}
+	if r.row == nil {
+		return nil
+	}
+	return r.row.Err()
+}
 
 type dbResult struct {
 	rowsAffected int64

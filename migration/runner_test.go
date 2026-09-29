@@ -38,7 +38,7 @@ func TestRunCLIDefaultAndNamespacedMigrations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	defer dbConn.Close()
+	defer func() { _ = dbConn.Close() }()
 	assertTableExists(t, dbConn, "users")
 	assertRowCount(t, dbConn, "users", 1)
 	assertTableMissing(t, dbConn, "demo_users")
@@ -100,6 +100,12 @@ func TestRunCLIHelpDocumentsMigrationType(t *testing.T) {
 	}
 	if strings.Contains(got, "\n  demo up\n") || strings.Contains(got, "\n  seed status\n") {
 		t.Fatalf("help output should not document positional migration type:\n%s", got)
+	}
+	// -t/--type 只限定 up/status/force/down 的迁移命名空间，不得让读者误以为能收窄 drop 的删除范围。
+	for _, want := range []string{"not limited by -t/--type", "does not limit drop"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("help output missing drop scope clarification %q:\n%s", want, got)
+		}
 	}
 }
 
@@ -184,9 +190,31 @@ func TestRunCLIDropRequiresConfirmation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	defer dbConn.Close()
+	defer func() { _ = dbConn.Close() }()
 	assertTableMissing(t, dbConn, "users")
 	assertTableMissing(t, dbConn, "schema_migrations")
+}
+
+func TestRunCLIDropRejectsConfirmationWithoutDeleting(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "000001_init.up.sql"), "CREATE TABLE users (id INTEGER PRIMARY KEY);")
+	dbPath := filepath.Join(t.TempDir(), "app.db")
+	cfg := Config{Driver: "sqlite", DSN: dbPath, SourceDir: dir}
+	if err := Up(context.Background(), cfg); err != nil {
+		t.Fatalf("Up: %v", err)
+	}
+
+	var out bytes.Buffer
+	err := RunCLI(context.Background(), CLIConfig{Config: cfg, Args: []string{"drop"}, Stdin: strings.NewReader("no\n"), Stdout: &out})
+	if err == nil {
+		t.Fatal("expected confirmation error")
+	}
+	dbConn, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer func() { _ = dbConn.Close() }()
+	assertTableExists(t, dbConn, "users")
 }
 
 func TestListTablesUsesCurrentSchemaForPostgres(t *testing.T) {
@@ -238,7 +266,7 @@ func assertTableExists(t *testing.T, dbConn *sql.DB, table string) {
 		t.Fatalf("query sqlite_master: %v", err)
 	}
 	if count == 0 {
-		t.Fatalf("table %s does not exist", table)
+		t.Fatalf("table %s missing", table)
 	}
 }
 

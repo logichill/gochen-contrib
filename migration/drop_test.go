@@ -27,7 +27,7 @@ func TestWithDropConnectionPinsSQLiteOperations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	defer database.Close()
+	defer func() { _ = database.Close() }()
 	raw, ok := stdsql.DBOf(database)
 	if !ok {
 		t.Fatal("expected stdsql database provider")
@@ -36,7 +36,7 @@ func TestWithDropConnectionPinsSQLiteOperations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("hold first connection: %v", err)
 	}
-	defer held.Close()
+	defer func() { _ = held.Close() }()
 	if _, err := held.ExecContext(ctx, "PRAGMA foreign_keys = ON"); err != nil {
 		t.Fatalf("enable foreign keys on held connection: %v", err)
 	}
@@ -53,7 +53,7 @@ func TestWithDropConnectionPinsSQLiteOperations(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		defer rows.Close()
+		defer func() { _ = rows.Close() }()
 		if !rows.Next() {
 			return rows.Err()
 		}
@@ -109,7 +109,7 @@ func TestDropSQLDBSupportsGORMAdapter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new gorm database adapter: %v", err)
 	}
-	defer database.Close()
+	defer func() { _ = database.Close() }()
 
 	got, err := dropSQLDB(database)
 	if err != nil {

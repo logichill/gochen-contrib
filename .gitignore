@@ -7,6 +7,9 @@ tmp
 !.editorconfig
 !.golangci.yml
 !.ignore
+!.github/
+!.github/workflows/
+!.github/workflows/database-contracts.yml
 
 # 质量改进相关文件
 # 这些文件可以选择性地提交到版本控制

@@ -39,10 +39,10 @@ func resolveModelMeta(db *gorm.DB, source *orm.ModelMeta) (*orm.ModelMeta, error
 			continue
 		}
 		for _, indexField := range index.Fields {
-			if indexField.Field == nil || indexField.Field.DBName == "" {
+			if indexField.Field == nil || indexField.DBName == "" {
 				continue
 			}
-			indexesByField[indexField.Field.DBName] = append(indexesByField[indexField.Field.DBName], index.Name)
+			indexesByField[indexField.DBName] = append(indexesByField[indexField.DBName], index.Name)
 		}
 	}
 

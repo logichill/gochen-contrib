@@ -35,7 +35,7 @@ func (m *model) Dialect() dialect.IDialect {
 	if m == nil || m.db == nil || m.db.Dialector == nil {
 		return dialect.New("")
 	}
-	return dialect.New(m.db.Dialector.Name())
+	return dialect.New(m.db.Name())
 }
 
 // First 处理First。

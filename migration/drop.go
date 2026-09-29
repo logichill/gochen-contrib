@@ -10,6 +10,10 @@ import (
 )
 
 // Drop 删除当前数据库中的全部非系统表。
+//
+// 该操作不会提供交互确认：调用方必须自行确保目标数据库正确。SQLite/MySQL
+// 在固定连接上执行逐表删除，过程不保证原子性；PostgreSQL 使用 CASCADE，
+// 可能同时删除依赖对象。CLI 默认会在调用前要求精确输入 yes。
 func Drop(ctx context.Context, cfg Config) error {
 	runner, err := NewRunner(ctx, cfg)
 	if err != nil {
@@ -19,7 +23,8 @@ func Drop(ctx context.Context, cfg Config) error {
 	return runner.Drop(ctx)
 }
 
-// Drop 删除当前数据库中的全部非系统表。
+// Drop 删除当前数据库中的全部非系统表。该操作逐表执行且可能受 CASCADE
+// 影响，失败时可能已删除部分表；调用方应在隔离环境中显式使用。
 func (r *Runner) Drop(ctx context.Context) error {
 	if r == nil || r.database == nil || r.runner == nil {
 		return errors.NewCode(errors.InvalidInput, "migration database is nil")
