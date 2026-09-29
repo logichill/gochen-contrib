@@ -30,7 +30,7 @@
 
 | 能力域 | 包路径 | 目标契约 | 说明 |
 | :--- | :--- | :--- | :--- |
-| **HTTP** | `gochen-contrib/http/gin` | `gochen/httpx.IServer` | 基于 Gin 引擎实现标准 HTTP 服务容器，支持路由清单提取与无缝注入 `host.Run`。 |
+| **HTTP** | `gochen-contrib/http/gin` | `gochen/httpx.IServer` | 基于 Gin 引擎实现标准 HTTP 服务容器，支持路由清单提取与注入 `quick.New`。 |
 | **Database Drivers** | `gochen-contrib/data/db/driver` | `database/sql/driver` | 集中注册 MySQL (`go-sql-driver/mysql`)、PostgreSQL (`lib/pq`)、SQLite 驱动。 |
 | **Database** | `gochen-contrib/data/db/gorm` | `gochen/db.IDatabase` | 基于 GORM 提供最小 `IDatabase` 适配器（Query/Exec/Tx/Raw）。 |
 | **Database Factory** | `gochen-contrib/data/db/gorm/factory` | `gochen/db.IDatabase` | 可选的多驱动配置入口，提供 `NewFromConfig` / `NewFromDSN`。 |
@@ -55,7 +55,7 @@ Gin 适配器不支持 Runtime `middleware.Timeout` 的异步处理链：Gin 上
 import (
     gogin "gochen-contrib/http/gin"
     gochenhttp "gochen-runtime/http"
-    "gochen-runtime/host"
+    "gochen-runtime/quick"
     hostconfig "gochen-runtime/host/config"
 )
 
@@ -68,10 +68,13 @@ if err != nil {
     log.Fatal(err)
 }
 
-host.Run(ctx,
+app := quick.New(
     hostconfig.WithHTTPServer(server),
-    // ...
 )
+app.Modules(NewBusinessModule)
+if err := app.Run(ctx); err != nil {
+    log.Fatal(err)
+}
 ```
 
 ### 2. 将 GORM 注入通用 Repository
@@ -101,3 +104,7 @@ GOWORK=off go test -tags=integration -count=1 ./db/migrate/gormmigrate
 ```
 
 集成测试分别通过 `GOCHEN_MYSQL_DSN`、`GOCHEN_POSTGRES_DSN` 连接测试数据库，创建并清理独立的测试表；未设置对应环境变量时跳过该数据库的用例。
+
+保存点与事务契约可用 `GOWORK=off go test -race -count=1 -v ./data/db/gorm -run '^TestExternalDialectSavepoints$'` 验证。设置 `GOCHEN_REQUIRE_DATABASE_TESTS=1` 后，缺少连接串会使选中的用例失败，避免 CI 静默跳过。
+
+`.github/workflows/database-contracts.yml` 在临时 PostgreSQL 17.5 / MySQL 8.4 服务上分别执行这些契约。Core、Runtime 按平级目录检出；仓库变量 `GOCHEN_CORE_REF` / `GOCHEN_RUNTIME_REF` 可固定配套版本，留空时使用各仓默认分支。依赖仓为私有仓时，需要配置只读这些仓库的 `GOCHEN_READ_TOKEN` secret。
