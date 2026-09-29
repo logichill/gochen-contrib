@@ -2,6 +2,7 @@ package redislock
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -267,5 +268,69 @@ func TestProvider_AcquireLeaseMaxDurationExceeded(t *testing.T) {
 		}
 	case <-time.After(500 * time.Millisecond):
 		t.Fatal("expected Lost channel to fire when max lease duration is reached")
+	}
+}
+
+// TestNew_DoesNotMutateConfig 验证成功与失败构造路径都不改写调用方配置：
+// 默认值归一化只发生在内部副本上。
+func TestNew_DoesNotMutateConfig(t *testing.T) {
+	_, client := setupTestRedis(t)
+
+	if _, err := New(nil, &Config{Owner: "a"}); err == nil {
+		t.Fatal("expected error for nil client")
+	}
+
+	emptyOwner := &Config{KeyPrefix: "keep:"}
+	if _, err := New(client, emptyOwner); err == nil {
+		t.Fatal("expected error for empty owner")
+	}
+	if emptyOwner.KeyPrefix != "keep:" || emptyOwner.TTL != 0 || emptyOwner.PollInterval != 0 ||
+		emptyOwner.MaxLeaseDuration != 0 || emptyOwner.Logger != nil {
+		t.Fatalf("failed construction mutated caller config: %+v", emptyOwner)
+	}
+
+	// 成功路径：内部完成归一化，输入对象仍为原始零值。
+	zero := &Config{Owner: "a"}
+	p, err := New(client, zero)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if zero.KeyPrefix != "" || zero.TTL != 0 || zero.PollInterval != 0 ||
+		zero.MaxLeaseDuration != 0 || zero.Logger != nil {
+		t.Fatalf("constructor mutated caller config: %+v", zero)
+	}
+	if p.keyPrefix != "distributed_locks:" || p.ttl != 30*time.Second ||
+		p.pollInterval != 50*time.Millisecond || p.maxLeaseDuration != 150*time.Second || p.logger == nil {
+		t.Fatalf("normalized values not applied: prefix=%q ttl=%v poll=%v max=%v",
+			p.keyPrefix, p.ttl, p.pollInterval, p.maxLeaseDuration)
+	}
+}
+
+// TestNew_ConcurrentSharedConfig 用同一配置指针并发构造，
+// 在 race 检测下验证构造器只读输入配置。
+func TestNew_ConcurrentSharedConfig(t *testing.T) {
+	_, client := setupTestRedis(t)
+	shared := &Config{Owner: "a"}
+
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			p, err := New(client, shared)
+			if err != nil {
+				t.Errorf("New: %v", err)
+				return
+			}
+			if p.ttl != 30*time.Second || p.keyPrefix != "distributed_locks:" {
+				t.Errorf("normalized values not applied: ttl=%v prefix=%q", p.ttl, p.keyPrefix)
+			}
+		}()
+	}
+	wg.Wait()
+
+	if shared.KeyPrefix != "" || shared.TTL != 0 || shared.PollInterval != 0 ||
+		shared.MaxLeaseDuration != 0 || shared.Logger != nil {
+		t.Fatalf("concurrent construction mutated shared config: %+v", shared)
 	}
 }

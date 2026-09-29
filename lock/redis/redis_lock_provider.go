@@ -54,6 +54,9 @@ func New(client redis.UniversalClient, cfg *Config) (*Provider, error) {
 	}
 	if cfg == nil {
 		cfg = &Config{}
+	} else {
+		cfgCopy := *cfg
+		cfg = &cfgCopy
 	}
 	if cfg.Owner == "" {
 		return nil, errors.NewCode(errors.InvalidInput, "owner cannot be empty")
