@@ -46,7 +46,7 @@ func (c *ginContext) Query(key string) string { return c.Context.Query(key) }
 func (c *ginContext) Param(key string) string { return c.Context.Param(key) }
 
 // Header 返回请求头。
-func (c *ginContext) Header(key string) string { return c.Context.GetHeader(key) }
+func (c *ginContext) Header(key string) string { return c.GetHeader(key) }
 
 // QueryParams 返回全部查询参数。
 func (c *ginContext) QueryParams() url.Values { return c.Context.Request.URL.Query() }
