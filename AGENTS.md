@@ -1,19 +1,17 @@
 # AGENTS 准则（Gochen Contrib）
 
-本仓库为 Gochen Contrib（module `gochen-contrib`），是 Gochen 官方的第三方外设与开源生态驱动适配器集（Gin, GORM, Redis, OTel, Prometheus, MySQL/Postgres 驱动注册与 Migration CLI）。
+本仓库为 Gochen Contrib（module `gochen-contrib`），是 Gochen 官方的第三方外设与开源生态驱动适配器集；局部约定见本文件与 `.agents/CONTEXT.md`。
 
-- 本仓库 `gochen-contrib`（Contrib）：生态适配器实现；局部约定见本文件与 `.agents/CONTEXT.md`
 - `../gochen`（Core，module `gochen`）：领域、应用、认证、事件、消息、策略、流程与 HTTP 抽象
 - `../gochen-runtime`（Runtime，module `gochen-runtime`）：Core 契约的标准 Go 运行时——SQL 实现、net/http server、host 容器、di、api/rest
 - 开发规范 `SPEC.md`、文档门户 `docs/` 与架构设计记录统一位于 `gochen` 仓库，**本仓库同样受其约束**
 
 ## 通用准则
 
-- 这是 golang 项目，需要在遵守 `gochen` 仓库 `SPEC.md` 的基础上遵守 golang 编码规范
-- 执行任何重构都不要保留兼容层代码，保持项目的干净清爽
+- Go 项目：遵守 Go 编码规范。
+- 重构不保留兼容层代码，保持项目的干净清爽。
 - 执行代码创建/修改后要执行 go fmt
-- 默认验证：本仓库内执行 `go build ./... && go vet ./... && go test -count=1 ./...`
-- 禁止把验证退化为 workspace 级一把梭——那会掩盖单仓库依赖不变量
+- 默认验证：本仓库内执行 `go build ./... && go vet ./... && go test -count=1 ./...`。禁止退化为 workspace 级一把梭，否则会掩盖单仓库依赖不变量。
 
 ## 命名铁律
 
