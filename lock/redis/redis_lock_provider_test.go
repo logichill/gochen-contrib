@@ -86,6 +86,9 @@ func TestProvider_AcquireTimeout(t *testing.T) {
 	if errors.Code(err) != errors.Timeout {
 		t.Fatalf("expected TIMEOUT, got %v", err)
 	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("timeout lost DeadlineExceeded cause: %v", err)
+	}
 }
 
 func TestProvider_ExpiresAndCanBeReacquired(t *testing.T) {

@@ -117,7 +117,7 @@ func (p *Provider) AcquireLease(ctx context.Context, key string) (lock.ILockLeas
 		ok, err := p.client.SetNX(ctx, redisKey, token, p.ttl).Result()
 		if err != nil {
 			if stdErrors.Is(err, context.DeadlineExceeded) {
-				return nil, errors.NewCode(errors.Timeout, "lock acquire timeout").
+				return nil, errors.NewCodeWithCause(errors.Timeout, "lock acquire timeout", err).
 					WithContext("key", key).
 					WithContext("ms", time.Since(start).Milliseconds())
 			}
@@ -133,7 +133,7 @@ func (p *Provider) AcquireLease(ctx context.Context, key string) (lock.ILockLeas
 		select {
 		case <-ctx.Done():
 			if stdErrors.Is(ctx.Err(), context.DeadlineExceeded) {
-				return nil, errors.NewCode(errors.Timeout, "lock acquire timeout").
+				return nil, errors.NewCodeWithCause(errors.Timeout, "lock acquire timeout", ctx.Err()).
 					WithContext("key", key).
 					WithContext("ms", time.Since(start).Milliseconds())
 			}
@@ -145,7 +145,7 @@ func (p *Provider) AcquireLease(ctx context.Context, key string) (lock.ILockLeas
 		case <-time.After(p.pollInterval):
 		case <-ctx.Done():
 			if stdErrors.Is(ctx.Err(), context.DeadlineExceeded) {
-				return nil, errors.NewCode(errors.Timeout, "lock acquire timeout").
+				return nil, errors.NewCodeWithCause(errors.Timeout, "lock acquire timeout", ctx.Err()).
 					WithContext("key", key).
 					WithContext("ms", time.Since(start).Milliseconds())
 			}
