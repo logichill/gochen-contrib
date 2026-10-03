@@ -103,7 +103,7 @@ func TestNormalizedSQLiteFileAllowsWriterDuringReadTransaction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
+	defer func() { _ = database.Close() }()
 	ctx := t.Context()
 	if _, err := database.ExecContext(ctx, "CREATE TABLE items (id INTEGER PRIMARY KEY); INSERT INTO items VALUES (1)"); err != nil {
 		t.Fatal(err)
@@ -112,12 +112,12 @@ func TestNormalizedSQLiteFileAllowsWriterDuringReadTransaction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer writer.Close()
+	defer func() { _ = writer.Close() }()
 	reader, err := database.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer reader.Rollback()
+	defer func() { _ = reader.Rollback() }()
 	var count int
 	if err := reader.QueryRowContext(ctx, "SELECT COUNT(*) FROM items").Scan(&count); err != nil || count != 1 {
 		t.Fatalf("initial read = %d, error = %v", count, err)
@@ -152,7 +152,7 @@ func TestNormalizedSQLiteWriteTransactionAvoidsLockUpgradeFailure(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
+	defer func() { _ = database.Close() }()
 	ctx := t.Context()
 	if _, err := database.ExecContext(ctx, "CREATE TABLE items (id INTEGER PRIMARY KEY)"); err != nil {
 		t.Fatal(err)
@@ -161,12 +161,12 @@ func TestNormalizedSQLiteWriteTransactionAvoidsLockUpgradeFailure(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer other.Close()
+	defer func() { _ = other.Close() }()
 	first, err := database.BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer first.Rollback()
+	defer func() { _ = first.Rollback() }()
 	var count int
 	if err := first.QueryRowContext(ctx, "SELECT COUNT(*) FROM items").Scan(&count); err != nil {
 		t.Fatal(err)
