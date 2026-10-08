@@ -2,11 +2,15 @@ package gormfactory
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	gormdb "gochen-contrib/data/db/gorm"
 	core "gochen/db"
 	"gochen/errors"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/lib/pq"
 )
 
 func TestDatabase_NewFromDSN_SQLite(t *testing.T) {
@@ -79,5 +83,89 @@ func TestDatabase_ConfigPreservesPoolAndOptions(t *testing.T) {
 	}
 	if sqlDB.Stats().MaxOpenConnections != 1 {
 		t.Fatalf("pool limit = %d, want 1", sqlDB.Stats().MaxOpenConnections)
+	}
+}
+
+func TestPostgresDSNQuotesCredentialKeywordValues(t *testing.T) {
+	tests := []struct {
+		name     string
+		user     string
+		password string
+		database string
+	}{
+		{name: "plain", user: "appuser", password: "secret", database: "appdb"},
+		{name: "password with space", user: "appuser", password: "p ass", database: "appdb"},
+		{name: "database with space", user: "appuser", password: "secret", database: "app db"},
+		{name: "single quote", user: "app'user", password: "p'ass", database: "app'db"},
+		{name: "backslash", user: `app\user`, password: `p\ass`, database: `app\db`},
+		{name: "mixed", user: `app \u'ser`, password: `p '\a ss`, database: `a\p 'db`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dsn := postgresDSN(core.DBConfig{
+				Host:     "127.0.0.1",
+				Port:     5432,
+				Username: tt.user,
+				Password: tt.password,
+				Database: tt.database,
+				Options:  map[string]any{"sslmode": "disable"},
+			})
+
+			pqCfg, err := pq.NewConfig(dsn)
+			if err != nil {
+				t.Fatalf("lib/pq rejected DSN %q: %v", dsn, err)
+			}
+			if pqCfg.Host != "127.0.0.1" || pqCfg.Port != 5432 || pqCfg.User != tt.user ||
+				pqCfg.Password != tt.password || pqCfg.Database != tt.database {
+				t.Fatalf("lib/pq parsed DSN %q as host=%q port=%d user=%q password=%q database=%q",
+					dsn, pqCfg.Host, pqCfg.Port, pqCfg.User, pqCfg.Password, pqCfg.Database)
+			}
+
+			pgxCfg, err := pgx.ParseConfig(dsn)
+			if err != nil {
+				t.Fatalf("pgx rejected DSN %q: %v", dsn, err)
+			}
+			if pgxCfg.Host != "127.0.0.1" || pgxCfg.Port != 5432 || pgxCfg.User != tt.user ||
+				pgxCfg.Password != tt.password || pgxCfg.Database != tt.database {
+				t.Fatalf("pgx parsed DSN %q as host=%q port=%d user=%q password=%q database=%q",
+					dsn, pgxCfg.Host, pgxCfg.Port, pgxCfg.User, pgxCfg.Password, pgxCfg.Database)
+			}
+		})
+	}
+}
+
+func TestPostgresDSNQuotesSSLOptionPaths(t *testing.T) {
+	const (
+		rootCert = "/etc/gochen certs/root ca.pem"
+		cert     = "/etc/gochen certs/client cert.pem"
+		key      = `/etc/gochen certs/client\key.pem`
+	)
+	dsn := postgresDSN(core.DBConfig{
+		Host:     "db.internal",
+		Port:     5432,
+		Username: "appuser",
+		Password: "secret",
+		Database: "appdb",
+		Options: map[string]any{
+			"sslmode":     "verify-full",
+			"sslrootcert": rootCert,
+			"sslcert":     cert,
+			"sslkey":      key,
+		},
+	})
+
+	pqCfg, err := pq.NewConfig(dsn)
+	if err != nil {
+		t.Fatalf("lib/pq rejected DSN %q: %v", dsn, err)
+	}
+	if string(pqCfg.SSLMode) != "verify-full" || pqCfg.SSLRootCert != rootCert || pqCfg.SSLCert != cert || pqCfg.SSLKey != key {
+		t.Fatalf("lib/pq parsed DSN %q as sslmode=%q sslrootcert=%q sslcert=%q sslkey=%q",
+			dsn, pqCfg.SSLMode, pqCfg.SSLRootCert, pqCfg.SSLCert, pqCfg.SSLKey)
+	}
+
+	quotedKey := "sslkey='" + strings.ReplaceAll(key, `\`, `\\`) + "'"
+	if !strings.Contains(dsn, quotedKey) {
+		t.Fatalf("DSN %q does not carry quoted sslkey %q", dsn, quotedKey)
 	}
 }

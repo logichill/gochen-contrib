@@ -3,11 +3,12 @@ package migration
 import (
 	"context"
 	"database/sql"
+	coredialect "gochen/db/dialect"
 	"strings"
 	"time"
 
 	"gochen/db"
-	"gochen/db/dialect"
+
 	"gochen/errors"
 	"gorm.io/gorm"
 )
@@ -21,7 +22,7 @@ type dropDatabase interface {
 
 type sqlConnDropDatabase struct {
 	conn    *sql.Conn
-	dialect dialect.IDialect
+	dialect coredialect.IDialect
 }
 
 func (d *sqlConnDropDatabase) Query(ctx context.Context, query string, args ...any) (db.IRows, error) {
@@ -40,8 +41,8 @@ type gormDBProvider interface {
 	GormDB() *gorm.DB
 }
 
-func withDropConnection(ctx context.Context, database db.IDatabase, d dialect.IDialect, fn func(dropDatabase) error) (err error) {
-	if d.Name() != dialect.NameSQLite && d.Name() != dialect.NameMySQL {
+func withDropConnection(ctx context.Context, database db.IDatabase, d coredialect.IDialect, fn func(dropDatabase) error) (err error) {
+	if d.Name() != coredialect.NameSQLite && d.Name() != coredialect.NameMySQL {
 		return fn(database)
 	}
 
@@ -95,14 +96,14 @@ func foreignKeyRestoreContext(ctx context.Context) (context.Context, context.Can
 	return context.WithTimeout(context.WithoutCancel(ctx), foreignKeyRestoreTimeout)
 }
 
-func listTables(ctx context.Context, database dropDatabase, d dialect.IDialect, excluded map[string]struct{}) (tables []string, err error) {
+func listTables(ctx context.Context, database dropDatabase, d coredialect.IDialect, excluded map[string]struct{}) (tables []string, err error) {
 	var query string
 	switch d.Name() {
-	case dialect.NameSQLite:
+	case coredialect.NameSQLite:
 		query = "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
-	case dialect.NameMySQL:
+	case coredialect.NameMySQL:
 		query = "SELECT table_name FROM information_schema.tables WHERE table_schema = DATABASE() AND table_type = 'BASE TABLE' ORDER BY table_name"
-	case dialect.NamePostgres:
+	case coredialect.NamePostgres:
 		query = "SELECT table_name FROM information_schema.tables WHERE table_schema = current_schema() AND table_type = 'BASE TABLE' ORDER BY table_name"
 	default:
 		return nil, errors.NewCode(errors.Unsupported, "unsupported migration drop dialect")
@@ -140,12 +141,12 @@ func isExcludedTable(table string, excluded map[string]struct{}) bool {
 	return ok
 }
 
-func disableForeignKeys(ctx context.Context, database dropDatabase, d dialect.IDialect) error {
+func disableForeignKeys(ctx context.Context, database dropDatabase, d coredialect.IDialect) error {
 	switch d.Name() {
-	case dialect.NameSQLite:
+	case coredialect.NameSQLite:
 		_, err := database.Exec(ctx, "PRAGMA foreign_keys = OFF")
 		return err
-	case dialect.NameMySQL:
+	case coredialect.NameMySQL:
 		_, err := database.Exec(ctx, "SET FOREIGN_KEY_CHECKS = 0")
 		return err
 	default:
@@ -153,12 +154,12 @@ func disableForeignKeys(ctx context.Context, database dropDatabase, d dialect.ID
 	}
 }
 
-func enableForeignKeys(ctx context.Context, database dropDatabase, d dialect.IDialect) error {
+func enableForeignKeys(ctx context.Context, database dropDatabase, d coredialect.IDialect) error {
 	switch d.Name() {
-	case dialect.NameSQLite:
+	case coredialect.NameSQLite:
 		_, err := database.Exec(ctx, "PRAGMA foreign_keys = ON")
 		return err
-	case dialect.NameMySQL:
+	case coredialect.NameMySQL:
 		_, err := database.Exec(ctx, "SET FOREIGN_KEY_CHECKS = 1")
 		return err
 	default:

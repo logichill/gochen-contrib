@@ -4,12 +4,13 @@ import (
 	"context"
 	"database/sql"
 	stderrors "errors"
+	coredialect "gochen/db/dialect"
 	"testing"
 	"time"
 
+	"gochen-runtime/db/dialect"
 	"gochen-runtime/eventing/store/sqlstore"
 	core "gochen/db"
-	"gochen/db/dialect"
 	"gochen/errors"
 	"gochen/eventing"
 
@@ -166,8 +167,8 @@ func TestTransaction_PreservesDialect(t *testing.T) {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	if got := dialect.FromDatabase(tx).Name(); got != dialect.NameSQLite {
-		t.Fatalf("transaction dialect = %q, want %q", got, dialect.NameSQLite)
+	if got := dialect.FromDatabase(tx).Name(); got != coredialect.NameSQLite {
+		t.Fatalf("transaction dialect = %q, want %q", got, coredialect.NameSQLite)
 	}
 	if tx.(interface{ Ping(context.Context) error }).Ping(context.Background()) != nil {
 		t.Fatal("transaction Ping should succeed")
@@ -890,5 +891,58 @@ func TestRow_ScanAndErrContract(t *testing.T) {
 	}
 	if err := detached.Err(); err != nil {
 		t.Fatalf("nil raw row Err = %v, want nil", err)
+	}
+}
+
+func TestDatabase_NilReceiverReturnsInvalidInput(t *testing.T) {
+	var db *Database
+	ctx := context.Background()
+
+	if _, err := db.Query(ctx, "SELECT 1"); errors.Code(err) != errors.InvalidInput {
+		t.Fatalf("Query on nil receiver error = %v, want InvalidInput", err)
+	}
+	if row := db.QueryRow(ctx, "SELECT 1"); errors.Code(row.Err()) != errors.InvalidInput {
+		t.Fatalf("QueryRow on nil receiver error = %v, want InvalidInput", row.Err())
+	}
+	if _, err := db.Exec(ctx, "SELECT 1"); errors.Code(err) != errors.InvalidInput {
+		t.Fatalf("Exec on nil receiver error = %v, want InvalidInput", err)
+	}
+	if _, err := db.Begin(ctx); errors.Code(err) != errors.InvalidInput {
+		t.Fatalf("Begin on nil receiver error = %v, want InvalidInput", err)
+	}
+	if _, err := db.BeginTx(ctx, nil); errors.Code(err) != errors.InvalidInput {
+		t.Fatalf("BeginTx on nil receiver error = %v, want InvalidInput", err)
+	}
+	if err := db.Ping(ctx); errors.Code(err) != errors.InvalidInput {
+		t.Fatalf("Ping on nil receiver error = %v, want InvalidInput", err)
+	}
+	if err := db.Close(); errors.Code(err) != errors.InvalidInput {
+		t.Fatalf("Close on nil receiver error = %v, want InvalidInput", err)
+	}
+}
+
+func TestTransaction_NilReceiverReturnsInvalidInput(t *testing.T) {
+	var tx *transaction
+	ctx := context.Background()
+
+	if _, err := tx.Query(ctx, "SELECT 1"); errors.Code(err) != errors.InvalidInput {
+		t.Fatalf("Query on nil transaction error = %v, want InvalidInput", err)
+	}
+	if row := tx.QueryRow(ctx, "SELECT 1"); errors.Code(row.Err()) != errors.InvalidInput {
+		t.Fatalf("QueryRow on nil transaction error = %v, want InvalidInput", row.Err())
+	}
+	if err := tx.Commit(); errors.Code(err) != errors.InvalidInput {
+		t.Fatalf("Commit on nil transaction error = %v, want InvalidInput", err)
+	}
+	if err := tx.Rollback(); errors.Code(err) != errors.InvalidInput {
+		t.Fatalf("Rollback on nil transaction error = %v, want InvalidInput", err)
+	}
+
+	var itx core.ITransaction = (*transaction)(nil)
+	if err := itx.Commit(); errors.Code(err) != errors.InvalidInput {
+		t.Fatalf("typed-nil ITransaction Commit error = %v, want InvalidInput", err)
+	}
+	if err := itx.Rollback(); errors.Code(err) != errors.InvalidInput {
+		t.Fatalf("typed-nil ITransaction Rollback error = %v, want InvalidInput", err)
 	}
 }

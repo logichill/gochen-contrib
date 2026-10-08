@@ -3,9 +3,10 @@ package migration
 import (
 	"context"
 	"fmt"
+	coredialect "gochen/db/dialect"
 
+	"gochen-runtime/db/dialect"
 	"gochen-runtime/db/sql/safeident"
-	"gochen/db/dialect"
 	"gochen/errors"
 )
 
@@ -37,7 +38,7 @@ func (r *Runner) Drop(ctx context.Context) error {
 	})
 }
 
-func dropTables(ctx context.Context, database dropDatabase, d dialect.IDialect, stateTable string) (err error) {
+func dropTables(ctx context.Context, database dropDatabase, d coredialect.IDialect, stateTable string) (err error) {
 	tables, err := listTables(ctx, database, d, nil)
 	if err != nil {
 		return err
@@ -62,7 +63,7 @@ func dropTables(ctx context.Context, database dropDatabase, d dialect.IDialect, 
 			return errors.NewCode(errors.InvalidInput, "unsafe table name").WithContext("table", table)
 		}
 		statement := fmt.Sprintf("DROP TABLE IF EXISTS %s", d.QuoteIdentifier(table))
-		if d.Name() == dialect.NamePostgres {
+		if d.Name() == coredialect.NamePostgres {
 			statement += " CASCADE"
 		}
 		if _, err := database.Exec(ctx, statement); err != nil {

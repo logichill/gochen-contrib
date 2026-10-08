@@ -46,4 +46,21 @@ func TestMetrics_RegisterAndObserve(t *testing.T) {
 	if !strings.Contains(body, "test_hist") {
 		t.Fatalf("expected exposition contains test_hist, got: %s", body)
 	}
+	// 仅指标名出现不足以捕获“观测值/标签过滤”回归，这里断言样本行本身。
+	for _, want := range []string{
+		`test_counter{a="1",b="2"} 2`,
+		`test_gauge{k="v"} 3.14`,
+		`test_hist_count{k="v"} 1`,
+		`test_hist_sum{k="v"} 7`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("expected exposition contains %q, got: %s", want, body)
+		}
+	}
+	if strings.Contains(body, "not_exist") {
+		t.Fatalf("unregistered metric should be a no-op, got: %s", body)
+	}
+	if strings.Contains(body, `ignored=`) {
+		t.Fatalf("unregistered label should be filtered out, got: %s", body)
+	}
 }

@@ -3,11 +3,12 @@ package gormdb
 import (
 	"context"
 	"database/sql"
+	coredialect "gochen/db/dialect"
 	"strings"
 
+	"gochen-runtime/db/dialect"
 	"gochen-runtime/db/sql/safeident"
 	core "gochen/db"
-	"gochen/db/dialect"
 	"gochen/errors"
 
 	"gorm.io/gorm"
@@ -207,9 +208,9 @@ func (t *transaction) ReleaseSavepoint(ctx context.Context, name string) error {
 	if ctx == nil {
 		return errors.NewCode(errors.InvalidInput, "ctx is nil")
 	}
-	dName := dialect.Name(t.DialectName())
+	dName := coredialect.Name(t.DialectName())
 	switch dName {
-	case dialect.NamePostgres, dialect.NameSQLite, dialect.NameMySQL:
+	case coredialect.NamePostgres, coredialect.NameSQLite, coredialect.NameMySQL:
 		res := t.db.WithContext(ctx).Exec("RELEASE SAVEPOINT " + normalizedName)
 		return res.Error
 	default:
@@ -227,10 +228,20 @@ func normalizeSavepointName(name string) (string, error) {
 }
 
 // Commit 提交当前事务。
-func (t *transaction) Commit() error { return t.controlDB().Commit().Error }
+func (t *transaction) Commit() error {
+	if t == nil || t.db == nil {
+		return errors.NewCode(errors.InvalidInput, "transaction is nil")
+	}
+	return t.controlDB().Commit().Error
+}
 
 // Rollback 回滚当前事务。
-func (t *transaction) Rollback() error { return t.controlDB().Rollback().Error }
+func (t *transaction) Rollback() error {
+	if t == nil || t.db == nil {
+		return errors.NewCode(errors.InvalidInput, "transaction is nil")
+	}
+	return t.controlDB().Rollback().Error
+}
 
 var _ core.ITransaction = (*transaction)(nil)
 var _ core.IDialectNameProvider = (*transaction)(nil)

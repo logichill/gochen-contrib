@@ -2,13 +2,14 @@ package gormmigrate
 
 import (
 	"fmt"
+	coredialect "gochen/db/dialect"
 	"reflect"
 	"sort"
 	"strings"
 	"sync"
 
+	"gochen-runtime/db/dialect"
 	dbschema "gochen-runtime/db/schema"
-	"gochen/db/dialect"
 	"gochen/errors"
 
 	gormschema "gorm.io/gorm/schema"
@@ -25,14 +26,19 @@ func SchemaFromModelsWithNamer(namer gormschema.Namer, models ...any) (*dbschema
 }
 
 // SchemaFromModelsWithDialect 使用方言感知的 SQL 类型映射转换 GORM 模型。
-func SchemaFromModelsWithDialect(d dialect.IDialect, models ...any) (*dbschema.Schema, error) {
+func SchemaFromModelsWithDialect(d coredialect.IDialect, models ...any) (*dbschema.Schema, error) {
 	return SchemaFromModelsWithNamerAndDialect(gormschema.NamingStrategy{}, d, models...)
 }
 
 // SchemaFromModelsWithNamerAndDialect 使用指定命名策略和 SQL 方言转换 GORM 模型。
-func SchemaFromModelsWithNamerAndDialect(namer gormschema.Namer, d dialect.IDialect, models ...any) (*dbschema.Schema, error) {
+//
+// namer 为 nil 时回退默认命名策略；d 为 nil 时回退 sqlite 方言（与 SchemaFromModels 默认一致）。
+func SchemaFromModelsWithNamerAndDialect(namer gormschema.Namer, d coredialect.IDialect, models ...any) (*dbschema.Schema, error) {
 	if namer == nil {
 		namer = gormschema.NamingStrategy{}
+	}
+	if d == nil {
+		d = dialect.New("sqlite")
 	}
 
 	cache := &sync.Map{}
@@ -52,7 +58,7 @@ func SchemaFromModelsWithNamerAndDialect(namer gormschema.Namer, d dialect.IDial
 	return result, nil
 }
 
-func convertGormSchema(parsed *gormschema.Schema, d dialect.IDialect) (dbschema.Table, []string) {
+func convertGormSchema(parsed *gormschema.Schema, d coredialect.IDialect) (dbschema.Table, []string) {
 	table := dbschema.Table{
 		Name:    parsed.Table,
 		Columns: make([]dbschema.Column, 0, len(parsed.DBNames)),
@@ -143,7 +149,7 @@ func hasExpressionIndexField(index *gormschema.Index) bool {
 	return false
 }
 
-func gormFieldType(field *gormschema.Field, d dialect.IDialect) string {
+func gormFieldType(field *gormschema.Field, d coredialect.IDialect) string {
 	if field == nil {
 		return ""
 	}
@@ -164,12 +170,12 @@ func gormFieldType(field *gormschema.Field, d dialect.IDialect) string {
 		}
 		return "TEXT"
 	case gormschema.Time:
-		if d.Name() == dialect.NamePostgres {
+		if d.Name() == coredialect.NamePostgres {
 			return "TIMESTAMPTZ"
 		}
 		return "DATETIME"
 	case gormschema.Bytes:
-		if d.Name() == dialect.NamePostgres {
+		if d.Name() == coredialect.NamePostgres {
 			return "BYTEA"
 		}
 		return "BLOB"
@@ -221,12 +227,12 @@ func isSQLLiteralDefault(value string) bool {
 	return false
 }
 
-func integerType(field *gormschema.Field, d dialect.IDialect) string {
-	if field.PrimaryKey && field.AutoIncrement && d.Name() == dialect.NameSQLite {
+func integerType(field *gormschema.Field, d coredialect.IDialect) string {
+	if field.PrimaryKey && field.AutoIncrement && d.Name() == coredialect.NameSQLite {
 		return "INTEGER"
 	}
 	unsigned := ""
-	if d.Name() == dialect.NameMySQL && isUnsignedIntegerKind(field.IndirectFieldType.Kind()) {
+	if d.Name() == coredialect.NameMySQL && isUnsignedIntegerKind(field.IndirectFieldType.Kind()) {
 		unsigned = " UNSIGNED"
 	}
 	switch field.IndirectFieldType.Kind() {

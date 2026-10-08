@@ -4,8 +4,8 @@ import (
 	"context"
 	"database/sql"
 
+	"gochen-runtime/db/dialect"
 	core "gochen/db"
-	"gochen/db/dialect"
 	"gochen/errors"
 
 	"gorm.io/gorm"
@@ -43,6 +43,9 @@ func (g *Database) Query(ctx context.Context, query string, args ...any) (core.I
 	if ctx == nil {
 		return nil, errors.NewCode(errors.InvalidInput, "ctx is nil")
 	}
+	if g == nil || g.db == nil {
+		return nil, errors.NewCode(errors.InvalidInput, "database is nil")
+	}
 	sqlRows, err := g.db.WithContext(ctx).Raw(query, args...).Rows()
 	if err != nil {
 		return nil, err
@@ -67,6 +70,9 @@ func (g *Database) Exec(ctx context.Context, query string, args ...any) (sql.Res
 	if ctx == nil {
 		return nil, errors.NewCode(errors.InvalidInput, "ctx is nil")
 	}
+	if g == nil || g.db == nil {
+		return nil, errors.NewCode(errors.InvalidInput, "database is nil")
+	}
 	res := g.db.WithContext(ctx).Exec(query, args...)
 	if res.Error != nil {
 		return nil, res.Error
@@ -82,6 +88,9 @@ func (g *Database) BeginTx(ctx context.Context, opts *sql.TxOptions) (core.ITran
 	if ctx == nil {
 		return nil, errors.NewCode(errors.InvalidInput, "ctx is nil")
 	}
+	if g == nil || g.db == nil {
+		return nil, errors.NewCode(errors.InvalidInput, "database is nil")
+	}
 	tx := g.db.WithContext(ctx).Begin(opts)
 	if tx.Error != nil {
 		return nil, tx.Error
@@ -94,6 +103,9 @@ func (g *Database) Ping(ctx context.Context) error {
 	if ctx == nil {
 		return errors.NewCode(errors.InvalidInput, "ctx is nil")
 	}
+	if g == nil || g.db == nil {
+		return errors.NewCode(errors.InvalidInput, "database is nil")
+	}
 	sqlDB, err := g.db.DB()
 	if err != nil {
 		return err
@@ -103,6 +115,9 @@ func (g *Database) Ping(ctx context.Context) error {
 
 // Close 关闭当前资源。
 func (g *Database) Close() error {
+	if g == nil || g.db == nil {
+		return errors.NewCode(errors.InvalidInput, "database is nil")
+	}
 	sqlDB, err := g.db.DB()
 	if err != nil {
 		return err

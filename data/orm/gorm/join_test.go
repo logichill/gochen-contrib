@@ -3,7 +3,7 @@ package gormorm
 import (
 	"testing"
 
-	"gochen/db/dialect"
+	"gochen-runtime/db/dialect"
 	"gochen/db/orm"
 )
 

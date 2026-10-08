@@ -9,11 +9,11 @@ import (
 	"testing"
 
 	gormdb "gochen-contrib/data/db/gorm"
+	"gochen-runtime/db/dialect"
 	"gochen-runtime/db/migrate"
 	dbschema "gochen-runtime/db/schema"
 	schemadiff "gochen-runtime/db/schema/diff"
 	core "gochen/db"
-	"gochen/db/dialect"
 
 	gormsqlite "github.com/glebarez/sqlite"
 	"gorm.io/gorm"

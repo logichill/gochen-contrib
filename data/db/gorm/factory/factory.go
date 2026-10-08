@@ -41,34 +41,7 @@ func NewFromConfig(ctx context.Context, cfg core.DBConfig, optFns ...gormdb.Opti
 		)
 		dialector = mysql.Open(dsn)
 	case "postgres", "postgresql":
-		sslmode := "require"
-		if cfg.Options != nil {
-			if mode, ok := cfg.Options["sslmode"].(string); ok && mode != "" {
-				sslmode = mode
-			}
-		}
-
-		dsn := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
-			cfg.Host,
-			cfg.Port,
-			cfg.Username,
-			cfg.Password,
-			cfg.Database,
-			sslmode,
-		)
-
-		if sslmode != "disable" && cfg.Options != nil {
-			if sslrootcert, ok := cfg.Options["sslrootcert"].(string); ok && sslrootcert != "" {
-				dsn += fmt.Sprintf(" sslrootcert=%s", sslrootcert)
-			}
-			if sslcert, ok := cfg.Options["sslcert"].(string); ok && sslcert != "" {
-				dsn += fmt.Sprintf(" sslcert=%s", sslcert)
-			}
-			if sslkey, ok := cfg.Options["sslkey"].(string); ok && sslkey != "" {
-				dsn += fmt.Sprintf(" sslkey=%s", sslkey)
-			}
-		}
-		dialector = postgres.Open(dsn)
+		dialector = postgres.Open(postgresDSN(cfg))
 	case "sqlite", "sqlite3":
 		dsn := strings.TrimSpace(cfg.Database)
 		if dsn == "" {
@@ -84,6 +57,47 @@ func NewFromConfig(ctx context.Context, cfg core.DBConfig, optFns ...gormdb.Opti
 		return nil, err
 	}
 	return database, nil
+}
+
+// postgresDSN 按 lib/pq 与 pgx 共用的关键字/值语法构造 PostgreSQL DSN。
+//
+// 所有值均加单引号并转义反斜杠与单引号，避免含空格、单引号或反斜杠的凭据被
+// 解析器截断（pgx 静默丢弃空格后的片段）或导致解析失败（lib/pq 直接报错）。
+func postgresDSN(cfg core.DBConfig) string {
+	sslmode := "require"
+	if cfg.Options != nil {
+		if mode, ok := cfg.Options["sslmode"].(string); ok && mode != "" {
+			sslmode = mode
+		}
+	}
+
+	dsn := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
+		quotePostgresDSNValue(cfg.Host),
+		cfg.Port,
+		quotePostgresDSNValue(cfg.Username),
+		quotePostgresDSNValue(cfg.Password),
+		quotePostgresDSNValue(cfg.Database),
+		quotePostgresDSNValue(sslmode),
+	)
+
+	if sslmode != "disable" && cfg.Options != nil {
+		if sslrootcert, ok := cfg.Options["sslrootcert"].(string); ok && sslrootcert != "" {
+			dsn += fmt.Sprintf(" sslrootcert=%s", quotePostgresDSNValue(sslrootcert))
+		}
+		if sslcert, ok := cfg.Options["sslcert"].(string); ok && sslcert != "" {
+			dsn += fmt.Sprintf(" sslcert=%s", quotePostgresDSNValue(sslcert))
+		}
+		if sslkey, ok := cfg.Options["sslkey"].(string); ok && sslkey != "" {
+			dsn += fmt.Sprintf(" sslkey=%s", quotePostgresDSNValue(sslkey))
+		}
+	}
+	return dsn
+}
+
+// quotePostgresDSNValue 按 libpq 关键字/值规则给值加单引号，并转义反斜杠与单引号；
+// lib/pq 与 pgx 的 DSN 解析器均支持该形式。
+func quotePostgresDSNValue(value string) string {
+	return "'" + strings.NewReplacer(`\`, `\\`, `'`, `\'`).Replace(value) + "'"
 }
 
 // NewFromDSN 根据驱动名称和 DSN 创建数据库适配器。

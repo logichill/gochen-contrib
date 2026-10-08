@@ -5,12 +5,13 @@ import (
 	"database/sql"
 	stdErrors "errors"
 	"fmt"
+	coredialect "gochen/db/dialect"
 	"strings"
 
+	"gochen-runtime/db/dialect"
 	"gochen-runtime/db/sql/safeident"
 	"gochen/contextx"
 	"gochen/db"
-	"gochen/db/dialect"
 	"gochen/db/orm"
 	"gochen/errors"
 
@@ -31,7 +32,7 @@ func (m *model) Meta() *orm.ModelMeta { return m.meta }
 func (m *model) Capabilities() orm.Capabilities { return m.capabilities }
 
 // Dialect 暴露当前 GORM model 的数据库方言，供通用 repo 安全 quote 动态列名。
-func (m *model) Dialect() dialect.IDialect {
+func (m *model) Dialect() coredialect.IDialect {
 	if m == nil || m.db == nil || m.db.Dialector == nil {
 		return dialect.New("")
 	}
@@ -178,26 +179,21 @@ func (m *model) UpdateValuesWithResult(ctx context.Context, values map[string]an
 
 // Delete 删除数据。
 func (m *model) Delete(ctx context.Context, opts ...orm.QueryOption) error {
-	db, err := m.apply(ctx, orm.CollectQueryOptions(opts...))
-	if err != nil {
-		return err
-	}
-	if m.meta == nil {
-		return errors.NewCode(errors.InvalidInput, "orm model meta cannot be nil")
-	}
-	target := m.meta.NewModel()
-	if target == nil {
-		return errors.NewCode(errors.InvalidInput, "orm model meta has no model prototype/factory")
-	}
-	if err := db.Delete(target).Error; err != nil {
-		return convertError(err)
-	}
-	return nil
+	_, err := m.DeleteWithResult(ctx, opts...)
+	return err
 }
 
 // DeleteWithResult 删除数据。
 func (m *model) DeleteWithResult(ctx context.Context, opts ...orm.QueryOption) (sql.Result, error) {
-	db, err := m.apply(ctx, orm.CollectQueryOptions(opts...))
+	qo := orm.CollectQueryOptions(opts...)
+	// GORM 的 SQLite/PostgreSQL 删除回调不会生成 LIMIT，必须在执行前拒绝，
+	// 否则有界删除会静默扩大为删除全部匹配记录。
+	if qo.Limit > 0 && !m.Dialect().SupportsDeleteLimit() {
+		return nil, errors.NewCode(errors.Unsupported, "DELETE ... LIMIT is not supported by the current dialect").
+			WithContext("dialect", string(m.Dialect().Name())).
+			WithContext("limit", qo.Limit)
+	}
+	db, err := m.apply(ctx, qo)
 	if err != nil {
 		return nil, err
 	}
@@ -320,7 +316,7 @@ func (m *model) apply(ctx context.Context, qo orm.QueryOptions) (*gorm.DB, error
 }
 
 // buildJoinExpr 构造JoinExpr。
-func buildJoinExpr(d dialect.IDialect, j orm.Join) (string, error) {
+func buildJoinExpr(d coredialect.IDialect, j orm.Join) (string, error) {
 	var joinType string
 	switch j.Type {
 	case orm.JoinInner:

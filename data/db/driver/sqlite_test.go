@@ -12,9 +12,10 @@ import (
 
 func TestNormalizeSQLiteDSN(t *testing.T) {
 	tests := []struct {
-		name string
-		in   string
-		want string
+		name    string
+		in      string
+		want    string
+		wantWAL bool
 	}{
 		{
 			name: "empty",
@@ -22,39 +23,59 @@ func TestNormalizeSQLiteDSN(t *testing.T) {
 			want: "",
 		},
 		{
-			name: "bare path",
-			in:   "app.db",
-			want: "file:app.db?_txlock=immediate&_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)",
+			name:    "bare path",
+			in:      "app.db",
+			wantWAL: true,
+			want:    "file:app.db?_txlock=immediate&_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)",
 		},
 		{
-			name: "memory",
-			in:   ":memory:",
-			want: ":memory:?cache=shared&_txlock=immediate&_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)",
+			name:    "memory",
+			in:      ":memory:",
+			wantWAL: true,
+			want:    ":memory:?cache=shared&_txlock=immediate&_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)",
 		},
 		{
 			name: "file prefix with query",
 			in:   "file:app.db?mode=ro",
-			want: "file:app.db?mode=ro&_txlock=immediate&_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)",
+			want: "file:app.db?mode=ro&_txlock=immediate&_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)",
 		},
 		{
 			name: "file prefix with trailing ampersand",
 			in:   "file:app.db?mode=ro&",
-			want: "file:app.db?mode=ro&_txlock=immediate&_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)",
+			want: "file:app.db?mode=ro&_txlock=immediate&_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)",
 		},
 		{
-			name: "named memory",
-			in:   "file:session?mode=memory",
-			want: "file:session?mode=memory&cache=shared&_txlock=immediate&_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)",
+			name: "readonly mode",
+			in:   "file:app.db?mode=readonly",
+			want: "file:app.db?mode=readonly&_txlock=immediate&_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)",
 		},
 		{
-			name: "explicit cache",
-			in:   "file:session?mode=memory&cache=private",
-			want: "file:session?mode=memory&cache=private&_txlock=immediate&_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)",
+			name: "immutable file",
+			in:   "file:app.db?immutable=1",
+			want: "file:app.db?immutable=1&_txlock=immediate&_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)",
 		},
 		{
-			name: "explicit transaction mode",
-			in:   "file:app.db?_txlock=deferred",
-			want: "file:app.db?_txlock=deferred&_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)",
+			name: "explicit journal mode pragma",
+			in:   "file:app.db?_pragma=journal_mode(DELETE)",
+			want: "file:app.db?_pragma=journal_mode(DELETE)&_txlock=immediate&_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)",
+		},
+		{
+			name:    "named memory",
+			in:      "file:session?mode=memory",
+			wantWAL: true,
+			want:    "file:session?mode=memory&cache=shared&_txlock=immediate&_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)",
+		},
+		{
+			name:    "explicit cache",
+			in:      "file:session?mode=memory&cache=private",
+			wantWAL: true,
+			want:    "file:session?mode=memory&cache=private&_txlock=immediate&_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)",
+		},
+		{
+			name:    "explicit transaction mode",
+			in:      "file:app.db?_txlock=deferred",
+			wantWAL: true,
+			want:    "file:app.db?_txlock=deferred&_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)",
 		},
 	}
 
@@ -64,7 +85,7 @@ func TestNormalizeSQLiteDSN(t *testing.T) {
 			if got != tt.want {
 				t.Fatalf("NormalizeSQLiteDSN(%q) = %q, want %q", tt.in, got, tt.want)
 			}
-			if tt.in != "" && !strings.Contains(got, "journal_mode(WAL)") {
+			if tt.wantWAL && !strings.Contains(got, "journal_mode(WAL)") {
 				t.Fatalf("expected WAL pragma in result: %s", got)
 			}
 		})
@@ -95,6 +116,53 @@ func TestNormalizeSQLiteDSNOpenAndPragma(t *testing.T) {
 	}
 	if busyTimeout != 5000 {
 		t.Fatalf("PRAGMA busy_timeout = %d, want 5000", busyTimeout)
+	}
+}
+
+func TestNormalizeSQLiteDSNReadOnlyOpensNonWALDatabase(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "readonly_legacy.db")
+	ctx := t.Context()
+
+	// 预置非 WAL 库（默认 journal_mode=delete），只读打开时若被强制切换 WAL 会报 SQLITE_READONLY。
+	writer, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("open writable database: %v", err)
+	}
+	if _, err := writer.ExecContext(ctx, "CREATE TABLE items (id INTEGER PRIMARY KEY); INSERT INTO items VALUES (1)"); err != nil {
+		t.Fatalf("seed database: %v", err)
+	}
+	var journalMode string
+	if err := writer.QueryRowContext(ctx, "PRAGMA journal_mode").Scan(&journalMode); err != nil {
+		t.Fatalf("query journal_mode: %v", err)
+	}
+	if strings.EqualFold(journalMode, "wal") {
+		t.Fatalf("precondition failed: seeded database must not use WAL, got %q", journalMode)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close writable database: %v", err)
+	}
+
+	dsn := driver.NormalizeSQLiteDSN("file:" + dbPath + "?mode=ro")
+	if strings.Contains(dsn, "journal_mode(WAL)") {
+		t.Fatalf("read-only DSN must not force WAL: %s", dsn)
+	}
+
+	reader, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		t.Fatalf("open read-only database: %v", err)
+	}
+	defer func() { _ = reader.Close() }()
+
+	var one int
+	if err := reader.QueryRowContext(ctx, "SELECT 1").Scan(&one); err != nil {
+		t.Fatalf("SELECT 1 on read-only database: %v", err)
+	}
+	var count int
+	if err := reader.QueryRowContext(ctx, "SELECT COUNT(*) FROM items").Scan(&count); err != nil {
+		t.Fatalf("read seeded table on read-only database: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("rows = %d, want 1", count)
 	}
 }
 

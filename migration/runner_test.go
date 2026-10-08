@@ -4,13 +4,14 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	coredialect "gochen/db/dialect"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"gochen-runtime/db/dialect"
 	"gochen/db"
-	"gochen/db/dialect"
 	"gochen/errors"
 )
 
@@ -218,7 +219,7 @@ func TestRunCLIDropRejectsConfirmationWithoutDeleting(t *testing.T) {
 }
 
 func TestListTablesUsesCurrentSchemaForPostgres(t *testing.T) {
-	database := &queryRecordingDB{dialectName: string(dialect.NamePostgres)}
+	database := &queryRecordingDB{dialectName: string(coredialect.NamePostgres)}
 	if _, err := listTables(context.Background(), database, dialect.New("postgres"), nil); err != nil {
 		t.Fatalf("listTables: %v", err)
 	}

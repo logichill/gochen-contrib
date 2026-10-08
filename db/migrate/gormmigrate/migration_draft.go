@@ -3,11 +3,13 @@ package gormmigrate
 import (
 	"context"
 	"fmt"
+	coredialect "gochen/db/dialect"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 
+	"gochen-runtime/db/dialect"
 	"gochen-runtime/db/migrate"
 	dbschema "gochen-runtime/db/schema"
 	schemadiff "gochen-runtime/db/schema/diff"
@@ -15,7 +17,6 @@ import (
 	"gochen-runtime/db/schema/render"
 	"gochen/contextx"
 	"gochen/db"
-	"gochen/db/dialect"
 	"gochen/errors"
 
 	gormschema "gorm.io/gorm/schema"
@@ -68,7 +69,7 @@ func GenerateMigrationDraftWithOptions(ctx context.Context, database db.IDatabas
 	}
 
 	dbDialect := dialect.FromDatabase(database)
-	if dbDialect.Name() == dialect.NameUnknown {
+	if dbDialect.Name() == coredialect.NameUnknown {
 		return nil, errors.NewCode(errors.InvalidInput, "unknown database dialect")
 	}
 	desired, err := SchemaFromModelsWithNamerAndDialect(opts.Namer, dbDialect, models...)
@@ -244,10 +245,10 @@ const (
 	defaultDraftMigrationType = "schema"
 )
 
-func migrationDraftWarnings(d dialect.IDialect, current *dbschema.Schema, desired *dbschema.Schema, changes schemadiff.Changes, drifts schemadiff.Drifts) []string {
+func migrationDraftWarnings(d coredialect.IDialect, current *dbschema.Schema, desired *dbschema.Schema, changes schemadiff.Changes, drifts schemadiff.Drifts) []string {
 	var warnings []string
 	switch d.Name() {
-	case dialect.NameMySQL, dialect.NamePostgres:
+	case coredialect.NameMySQL, coredialect.NamePostgres:
 		warnings = append(warnings, "MySQL/Postgres introspection covers tables, columns, and simple column indexes only; review foreign keys, check constraints, expression/partial indexes, and complex constraints manually.")
 	}
 	if current != nil {
@@ -261,21 +262,21 @@ func migrationDraftWarnings(d dialect.IDialect, current *dbschema.Schema, desire
 	return warnings
 }
 
-func additiveRiskWarnings(d dialect.IDialect, changes schemadiff.Changes) []string {
+func additiveRiskWarnings(d coredialect.IDialect, changes schemadiff.Changes) []string {
 	var warnings []string
 	for _, change := range changes {
 		if change.Kind != schemadiff.KindAddColumn || change.Column == nil {
 			continue
 		}
-		if isUnsafeNotNullAddColumn(change) && d.Name() != dialect.NameSQLite {
+		if isUnsafeNotNullAddColumn(change) && d.Name() != coredialect.NameSQLite {
 			warnings = append(warnings, fmt.Sprintf("Adding NOT NULL column %s.%s without a default may fail when the table already contains rows", change.Table, change.Column.Name))
 		}
 	}
 	return warnings
 }
 
-func renderableMigrationChanges(d dialect.IDialect, changes schemadiff.Changes) (schemadiff.Changes, []string) {
-	if d.Name() != dialect.NameSQLite {
+func renderableMigrationChanges(d coredialect.IDialect, changes schemadiff.Changes) (schemadiff.Changes, []string) {
+	if d.Name() != coredialect.NameSQLite {
 		return changes, nil
 	}
 

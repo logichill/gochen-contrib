@@ -1,11 +1,14 @@
 package gormmigrate
 
 import (
+	"reflect"
 	"testing"
 	"time"
 
+	"gochen-runtime/db/dialect"
 	dbschema "gochen-runtime/db/schema"
-	"gochen/db/dialect"
+
+	gormschema "gorm.io/gorm/schema"
 )
 
 type schemaUser struct {
@@ -135,6 +138,29 @@ func TestSchemaFromModelsWithDialectMySQLPreservesUnsignedIntegers(t *testing.T)
 	assertColumn(t, &table, "id", "BIGINT UNSIGNED", false, "", true, true)
 	assertColumn(t, &table, "tenant_id", "INTEGER UNSIGNED", true, "", false, false)
 	assertColumn(t, &table, "flags", "INTEGER UNSIGNED", true, "", false, false)
+}
+
+func TestSchemaFromModelsWithNilDialectFallsBackToSQLite(t *testing.T) {
+	want, err := SchemaFromModels(&schemaUser{})
+	if err != nil {
+		t.Fatalf("SchemaFromModels: %v", err)
+	}
+
+	got, err := SchemaFromModelsWithDialect(nil, &schemaUser{})
+	if err != nil {
+		t.Fatalf("SchemaFromModelsWithDialect(nil dialect): %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("nil dialect schema = %+v, want sqlite fallback %+v", got, want)
+	}
+
+	gotWithNamer, err := SchemaFromModelsWithNamerAndDialect(gormschema.NamingStrategy{}, nil, &schemaUser{})
+	if err != nil {
+		t.Fatalf("SchemaFromModelsWithNamerAndDialect(nil dialect): %v", err)
+	}
+	if !reflect.DeepEqual(gotWithNamer, want) {
+		t.Fatalf("nil dialect with explicit namer schema = %+v, want sqlite fallback %+v", gotWithNamer, want)
+	}
 }
 
 func TestSchemaFromModelsPreservesSQLKeywordDefaultOnTextColumn(t *testing.T) {
