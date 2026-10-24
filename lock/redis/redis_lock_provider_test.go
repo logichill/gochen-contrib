@@ -274,6 +274,38 @@ func TestProvider_AcquireLeaseMaxDurationExceeded(t *testing.T) {
 	}
 }
 
+func TestProvider_AcquireLeaseMaxDurationDisabled(t *testing.T) {
+	_, client := setupTestRedis(t)
+	ttl := 30 * time.Millisecond
+	p, err := New(client, &Config{
+		Owner:            "a",
+		KeyPrefix:        "t:",
+		TTL:              ttl,
+		MaxLeaseDuration: -1,
+		PollInterval:     5 * time.Millisecond,
+		Logger:           logging.NewNoopLogger(),
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if p.maxLeaseDuration >= 0 {
+		t.Fatalf("expected negative maxLeaseDuration to disable cap, got %v", p.maxLeaseDuration)
+	}
+
+	lease, err := p.AcquireLease(context.Background(), "k")
+	if err != nil {
+		t.Fatalf("AcquireLease: %v", err)
+	}
+	defer lease.Release()
+
+	// 持锁超过默认上限 5*TTL（150ms），禁用上限后看门狗应持续续租且不触发 Lost。
+	select {
+	case err := <-lease.Lost():
+		t.Fatalf("expected lease to remain active when MaxLeaseDuration < 0, got Lost: %v", err)
+	case <-time.After(6 * ttl):
+	}
+}
+
 // TestNew_DoesNotMutateConfig 验证成功与失败构造路径都不改写调用方配置：
 // 默认值归一化只发生在内部副本上。
 func TestNew_DoesNotMutateConfig(t *testing.T) {
@@ -335,5 +367,49 @@ func TestNew_ConcurrentSharedConfig(t *testing.T) {
 	if shared.KeyPrefix != "" || shared.TTL != 0 || shared.PollInterval != 0 ||
 		shared.MaxLeaseDuration != 0 || shared.Logger != nil {
 		t.Fatalf("concurrent construction mutated shared config: %+v", shared)
+	}
+}
+
+// TestProvider_AcquireLeaseLostWhenRedisUnreachable 验证 Redis 假死（网络分区）时
+// 看门狗能在 TTL 内发出 Lost 信号。
+//
+// 时序：TTL=90ms → 续租间隔 30ms；假死发生在首次续租前，3 次尝试（各 10ms 超时
+// + 退避）全部失败后 elapsed 远小于 TTL，看门狗进入快速重试；分区持续超过 TTL
+// 后，下一次续租循环以 Cache 错误码关 Lost——持有方在锁实际过期前后即收到通知，
+// 而不是等业务侧撞上互斥失效。
+func TestProvider_AcquireLeaseLostWhenRedisUnreachable(t *testing.T) {
+	s, client := setupTestRedis(t)
+	p, err := New(client, &Config{
+		Owner:        "a",
+		KeyPrefix:    "t:",
+		TTL:          90 * time.Millisecond,
+		PollInterval: 5 * time.Millisecond,
+		Logger:       logging.NewNoopLogger(),
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	lease, err := p.AcquireLease(context.Background(), "k")
+	if err != nil {
+		t.Fatalf("AcquireLease: %v", err)
+	}
+	defer lease.Release()
+
+	// Redis 假死：所有命令返回错误，模拟网络分区。
+	s.SetError("SIMULATED NETWORK PARTITION")
+
+	// 分区持续超过整个 TTL，Lost 必须触发且不得晚于太多（留出调度余量）。
+	deadline := time.Now().Add(2 * p.ttl)
+	select {
+	case err := <-lease.Lost():
+		if err == nil {
+			t.Fatal("expected error on lost lease")
+		}
+		if errors.Code(err) != errors.Cache {
+			t.Fatalf("expected CACHE error code, got %v", err)
+		}
+	case <-time.After(time.Until(deadline)):
+		t.Fatal("expected Lost signal within lease TTL after partition")
 	}
 }

@@ -27,7 +27,12 @@ type Config struct {
 	// TTL 锁过期时间（默认：30s）。
 	TTL time.Duration
 
-	// MaxLeaseDuration 租约单次最大生命周期上限（防调用方泄漏；默认：0 表示由 5*TTL 兜底自动放行）。
+	// MaxLeaseDuration 租约单次最大生命周期上限（防调用方泄漏）。
+	//
+	// 语义：
+	//   - > 0：到达该上限后停止续期并主动释放锁（防泄漏）；
+	//   - == 0：使用默认值 5*TTL；
+	//   - < 0：显式禁用上限，长任务不会被看门狗主动释放。
 	MaxLeaseDuration time.Duration
 
 	// PollInterval 未获取到锁时的轮询等待时间（默认：50ms）。
@@ -68,7 +73,8 @@ func New(client redis.UniversalClient, cfg *Config) (*Provider, error) {
 		cfg.TTL = 30 * time.Second
 	}
 	maxLeaseDuration := cfg.MaxLeaseDuration
-	if maxLeaseDuration <= 0 {
+	if maxLeaseDuration == 0 {
+		// 未配置：用 5*TTL 兜底防泄漏；显式负数表示禁用上限（长任务）。
 		maxLeaseDuration = 5 * cfg.TTL
 	}
 	if cfg.PollInterval <= 0 {
@@ -113,6 +119,12 @@ func (p *Provider) AcquireLease(ctx context.Context, key string) (lock.ILockLeas
 	redisKey := p.keyPrefix + key
 
 	start := time.Now()
+	var timer *time.Timer
+	defer func() {
+		if timer != nil {
+			timer.Stop()
+		}
+	}()
 	for {
 		ok, err := p.client.SetNX(ctx, redisKey, token, p.ttl).Result()
 		if err != nil {
@@ -141,8 +153,14 @@ func (p *Provider) AcquireLease(ctx context.Context, key string) (lock.ILockLeas
 		default:
 		}
 
+		if timer == nil {
+			timer = time.NewTimer(p.pollInterval)
+		} else {
+			timer.Reset(p.pollInterval)
+		}
+
 		select {
-		case <-time.After(p.pollInterval):
+		case <-timer.C:
 		case <-ctx.Done():
 			if stdErrors.Is(ctx.Err(), context.DeadlineExceeded) {
 				return nil, errors.NewCodeWithCause(errors.Timeout, "lock acquire timeout", ctx.Err()).
@@ -179,14 +197,19 @@ func (p *Provider) startRenewal(redisKey string, token string, safeLost *lock.Sa
 	startTime := time.Now()
 
 	go func() {
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
+		// 无论因何退出（主动停止、达到上限、丢失租约、续期失败），
+		// 都释放 renewCtx 及其上下文树：否则若上层仅监听 lease.Lost()
+		// 而未显式 Release，关联的 timer/超时资源只能等 GC 回收。
+		defer cancel()
+		lastRenewTime := startTime
+		timer := time.NewTimer(interval)
+		defer timer.Stop()
 
 		for {
 			select {
 			case <-renewCtx.Done():
 				return
-			case <-ticker.C:
+			case <-timer.C:
 				if p.maxLeaseDuration > 0 && time.Since(startTime) >= p.maxLeaseDuration {
 					p.logger.Warn(contextx.Background(), "lock lease max duration reached, stopping renewal to prevent leak",
 						logging.String("redis_key", redisKey))
@@ -194,26 +217,105 @@ func (p *Provider) startRenewal(redisKey string, token string, safeLost *lock.Sa
 					return
 				}
 
-				execCtx, execCancel := context.WithTimeout(renewCtx, interval)
-				res, err := renewScript.Run(execCtx, p.client, []string{redisKey}, token, ttlMs).Result()
-				execCancel()
+				const maxRenewAttempts = 3
+				var renewErr error
+				var lostLease bool
 
-				if err != nil {
+				backoff := interval / 4
+				if backoff > 50*time.Millisecond {
+					backoff = 50 * time.Millisecond
+				}
+				if backoff <= 0 {
+					backoff = 10 * time.Millisecond
+				}
+
+				for attempt := 1; attempt <= maxRenewAttempts; attempt++ {
 					if stdErrors.Is(renewCtx.Err(), context.Canceled) {
 						return
 					}
-					p.logger.Warn(contextx.Background(), "lock renewal failed",
-						logging.Error(err), logging.String("redis_key", redisKey))
-					safeLost.Close(errors.Wrap(err, errors.Cache, "lock renewal failed"))
-					return
+					// 剩余租约时间裁剪：单次尝试（含重试退避）不得把总耗时推过
+					// 租约到期点，否则会在锁已被 Redis 自动释放后才退出循环，
+					// 期间业务误以为仍持锁。
+					remainingLease := p.ttl - time.Since(lastRenewTime)
+					if remainingLease <= 0 {
+						// renewErr 可能为 nil（首次尝试前租约已耗尽），Wrap(nil) 返回 nil，
+						// 会把 lost 通道以 nil 错误关闭；必须显式构造错误。
+						if renewErr == nil {
+							renewErr = errors.NewCode(errors.Timeout, "lock renewal window exhausted before lease expiry")
+						}
+						safeLost.Close(errors.Wrap(renewErr, errors.Cache, "lock renewal failed: lease expired"))
+						return
+					}
+					attemptTimeout := interval / time.Duration(maxRenewAttempts)
+					if attemptTimeout <= 0 || attemptTimeout > 5*time.Second {
+						attemptTimeout = 2 * time.Second
+					}
+					if attemptTimeout > remainingLease {
+						attemptTimeout = remainingLease
+					}
+					execCtx, execCancel := context.WithTimeout(renewCtx, attemptTimeout)
+					res, err := renewScript.Run(execCtx, p.client, []string{redisKey}, token, ttlMs).Result()
+					execCancel()
+
+					if err != nil {
+						if stdErrors.Is(renewCtx.Err(), context.Canceled) {
+							return
+						}
+						renewErr = err
+						p.logger.Warn(contextx.Background(), "lock renewal transient failure, retrying",
+							logging.Error(err), logging.String("redis_key", redisKey), logging.Int("attempt", attempt))
+						if attempt < maxRenewAttempts {
+							// 退避同样受剩余租约裁剪，避免退避本身跨越到期点。
+							if wait := backoff; wait <= remainingLease {
+								select {
+								case <-renewCtx.Done():
+									return
+								case <-time.After(wait):
+									continue
+								}
+							}
+						}
+						break
+					}
+
+					if n, ok := res.(int64); !ok || n == 0 {
+						lostLease = true
+						break
+					}
+					renewErr = nil
+					lastRenewTime = time.Now()
+					break
 				}
 
-				if n, ok := res.(int64); !ok || n == 0 {
+				if lostLease {
 					p.logger.Warn(contextx.Background(), "lock renewal lost lease (token mismatch or expired)",
 						logging.String("redis_key", redisKey))
 					safeLost.Close(errors.NewCode(errors.Conflict, "lock lease lost"))
 					return
 				}
+
+				if renewErr != nil {
+					p.logger.Warn(contextx.Background(), "lock renewal failed after retries",
+						logging.Error(renewErr), logging.String("redis_key", redisKey))
+					elapsed := time.Since(lastRenewTime)
+					if elapsed >= p.ttl {
+						safeLost.Close(errors.Wrap(renewErr, errors.Cache, "lock renewal failed: lease expired"))
+						return
+					}
+					// 距离上次成功续租未超过 TTL，锁在 Redis 端仍有效，缩短间隔后快速重试
+					retryDelay := interval / 2
+					remaining := p.ttl - elapsed
+					if retryDelay > remaining/2 {
+						retryDelay = remaining / 2
+					}
+					if retryDelay <= 0 {
+						retryDelay = 10 * time.Millisecond
+					}
+					timer.Reset(retryDelay)
+					continue
+				}
+
+				timer.Reset(interval)
 			}
 		}
 	}()
