@@ -1,11 +1,13 @@
 package prometheusmetrics
 
 import (
+	"math"
 	"net/http"
 	"sort"
 	"sync"
 	"time"
 
+	"gochen/errors"
 	"gochen/observe"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -95,10 +97,13 @@ func (m *Metrics) RegisterGauge(name, help string, labelNames []string) error {
 
 // RegisterHistogram 注册 histogram。
 func (m *Metrics) RegisterHistogram(name, help string, labelNames []string, buckets []float64) error {
+	if err := validateBuckets(buckets); err != nil {
+		return err
+	}
 	labelNames = normalizeLabelNames(labelNames)
 	opts := prometheus.HistogramOpts{Name: name, Help: help}
 	if len(buckets) > 0 {
-		opts.Buckets = buckets
+		opts.Buckets = append([]float64(nil), buckets...)
 	}
 	vec := prometheus.NewHistogramVec(opts, labelNames)
 	if err := m.registry.Register(vec); err != nil {
@@ -108,6 +113,26 @@ func (m *Metrics) RegisterHistogram(name, help string, labelNames []string, buck
 	m.mu.Lock()
 	m.histograms[name] = histogramMetric{vec: vec, labelNames: labelNames}
 	m.mu.Unlock()
+	return nil
+}
+
+// validateBuckets 在装配期校验分桶。
+//
+// Prometheus 客户端不校验乱序/非有限分桶，问题会推迟到首次观察或采集时
+// 才以 panic 形式暴露；无效配置必须在注册阶段以错误形式返回。
+func validateBuckets(buckets []float64) error {
+	for i, b := range buckets {
+		if math.IsNaN(b) || math.IsInf(b, 0) {
+			return errors.NewCode(errors.InvalidInput, "histogram buckets must be finite").
+				WithContext("index", i)
+		}
+		if i > 0 && b <= buckets[i-1] {
+			return errors.NewCode(errors.InvalidInput, "histogram buckets must be strictly increasing").
+				WithContext("index", i).
+				WithContext("previous", buckets[i-1]).
+				WithContext("current", b)
+		}
+	}
 	return nil
 }
 

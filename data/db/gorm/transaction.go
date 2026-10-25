@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	coredialect "gochen/db/dialect"
+	"fmt"
 	"strings"
 
 	"gochen-runtime/db/dialect"
@@ -105,6 +106,19 @@ func (t *transaction) Ping(ctx context.Context) error {
 		return errors.NewCode(errors.InvalidInput, "ctx is nil")
 	}
 	return nil
+}
+
+// DatasourceID 实现 core.IDatasourceIdentityProvider。
+// 事务与其根连接同属一个物理数据源；前缀与 gorm ORM 适配层一致（"gorm:"），
+// 同池句柄跨适配层必须得到相同身份。
+func (t *transaction) DatasourceID() string {
+	if t == nil || t.db == nil {
+		return ""
+	}
+	if sqlDB, err := t.db.DB(); err == nil && sqlDB != nil {
+		return fmt.Sprintf("gorm:%p", sqlDB)
+	}
+	return fmt.Sprintf("gorm:%p", t.db)
 }
 
 // Close 关闭当前资源。

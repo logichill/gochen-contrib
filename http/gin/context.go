@@ -39,6 +39,11 @@ func (c *ginContext) Method() string { return c.Context.Request.Method }
 // Path 返回请求 URL 路径。
 func (c *ginContext) Path() string { return c.Context.Request.URL.Path }
 
+// RoutePattern 返回命中的路由模板（gin 路由语法，如 "/items/:slug"）。
+// 未命中任何路由（404）时 gin 返回空字符串，调用方应将此类请求归入固定
+// 类别，避免以客户端可控的原始路径作为指标标签。
+func (c *ginContext) RoutePattern() string { return c.Context.FullPath() }
+
 // Query 返回指定查询参数的首个值。
 func (c *ginContext) Query(key string) string { return c.Context.Query(key) }
 

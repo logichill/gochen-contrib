@@ -3,6 +3,7 @@ package gormorm
 import (
 	"context"
 	"database/sql"
+	"fmt"
 
 	"gochen-contrib/data/db/gorm"
 	"gochen/contextx"
@@ -18,6 +19,9 @@ type Orm struct {
 	db           *gorm.DB
 	database     db.IDatabase
 	capabilities orm.Capabilities
+	// datasourceID 派生自根 *gorm.DB 的进程内稳定标识；事务会话与其根 Orm
+	// 共享同一标识，供仓储校验事务会话的数据源归属。
+	datasourceID string
 }
 
 // New 创建Orm。
@@ -36,7 +40,31 @@ func New(db *gorm.DB) (*Orm, error) {
 			orm.CapabilityTransaction,
 			orm.CapabilityOptimisticLock,
 		),
+		datasourceID: gormDatasourceID(db),
 	}, nil
+}
+
+// gormDatasourceID 从连接池派生进程内稳定的数据源身份。
+//
+// 必须取底层 *sql.DB 而不是 *gorm.DB 指针：同一连接池经 WithContext /
+// Session 派生会得到新的 *gorm.DB 实例，按实例指针派生会把同库误判成异源。
+// 取不到 *sql.DB（非 database/sql 后端）时退回实例指针，尽力保持可区分。
+func gormDatasourceID(db *gorm.DB) string {
+	if db == nil {
+		return ""
+	}
+	if sqlDB, err := db.DB(); err == nil && sqlDB != nil {
+		return fmt.Sprintf("gorm:%p", sqlDB)
+	}
+	return fmt.Sprintf("gorm:%p", db)
+}
+
+// DatasourceID 实现 db.IDatasourceIdentityProvider 语义。
+func (g *Orm) DatasourceID() string {
+	if g == nil {
+		return ""
+	}
+	return g.datasourceID
 }
 
 // NewFromDatabase 创建从Database。
@@ -64,7 +92,7 @@ func (g *Orm) WithContext(ctx context.Context) orm.IOrm {
 	if ctx == nil {
 		ctx = contextx.Background()
 	}
-	return &Orm{db: g.db.WithContext(ctx), database: g.database, capabilities: g.capabilities}
+	return &Orm{db: g.db.WithContext(ctx), database: g.database, capabilities: g.capabilities, datasourceID: g.datasourceID}
 }
 
 // Model 处理模型。
@@ -96,7 +124,7 @@ func (g *Orm) BeginTx(ctx context.Context, opts *sql.TxOptions) (orm.IOrmSession
 		optFns = append(optFns, gormdb.WithMaxBindParameters(p.MaxBindParameters()))
 	}
 	return &session{
-		Orm:         Orm{db: tx, database: gormdb.NewTransactionDatabase(tx, optFns...), capabilities: g.capabilities},
+		Orm:         Orm{db: tx, database: gormdb.NewTransactionDatabase(tx, optFns...), capabilities: g.capabilities, datasourceID: g.datasourceID},
 		afterCommit: contextx.NewAfterCommitDispatcher(),
 	}, nil
 }

@@ -3,6 +3,7 @@ package gormdb
 import (
 	"context"
 	"database/sql"
+	"fmt"
 
 	"gochen-runtime/db/dialect"
 	core "gochen/db"
@@ -131,6 +132,20 @@ func (g *Database) GormDB() *gorm.DB {
 		return nil
 	}
 	return g.db
+}
+
+// DatasourceID 实现 core.IDatasourceIdentityProvider。
+// 身份取底层 *sql.DB（连接池）指针：同一连接池的派生句柄返回相同标识，
+// 供事务会话归属校验区分数据源。前缀与 gorm ORM 适配层一致（"gorm:"）：
+// 身份由数据源统一生成，ORM 与事务包装只继承，同池不同适配层必须相等。
+func (g *Database) DatasourceID() string {
+	if g == nil || g.db == nil {
+		return ""
+	}
+	if sqlDB, err := g.db.DB(); err == nil && sqlDB != nil {
+		return fmt.Sprintf("gorm:%p", sqlDB)
+	}
+	return fmt.Sprintf("gorm:%p", g.db)
 }
 
 // DialectName 返回Dialect名称。
