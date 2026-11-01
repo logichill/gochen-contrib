@@ -7,17 +7,19 @@ import (
 	repopkg "gochen-runtime/db/orm/repo"
 	"gochen/app/query"
 	"gochen/db/orm"
+	"gochen/domain/spec"
 )
 
 type queryUser struct {
-	ID       int64  `gorm:"primaryKey"`
+	ID       int64  `gorm:"primaryKey" role:"id"`
 	TenantID string `gorm:"column:tenant_id;index"`
 	Name     string `gorm:"column:name"`
 	Version  uint64 `gorm:"column:version"`
 }
 
-func (u *queryUser) GetID() int64       { return u.ID }
-func (u *queryUser) GetVersion() uint64 { return u.Version }
+func (u *queryUser) GetID() int64        { return u.ID }
+func (u *queryUser) GetVersion() uint64  { return u.Version }
+func (u *queryUser) SetVersion(v uint64) { u.Version = v }
 
 func TestOrm_ModelInfersFieldMetadataForRepositoryQueries(t *testing.T) {
 	db := setupDB(t)
@@ -40,7 +42,7 @@ func TestOrm_ModelInfersFieldMetadataForRepositoryQueries(t *testing.T) {
 		Filters: query.QueryFilters{
 			"tenant_id": {{Op: query.FilterOpEq, Value: query.StringValue("tenant-a")}},
 		},
-	})
+	}, spec.All())
 	if err != nil {
 		t.Fatalf("Query with inferred tenant_id field: %v", err)
 	}

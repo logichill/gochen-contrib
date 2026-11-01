@@ -7,9 +7,10 @@ import (
 
 	gormdb "gochen-contrib/data/db/gorm"
 	repopkg "gochen-runtime/db/orm/repo"
-	projection "gochen/eventing/projection"
 	checkpointstore "gochen-runtime/eventing/projection/sqlstore"
+	"gochen/domain/spec"
 	"gochen/errors"
+	projection "gochen/eventing/projection"
 
 	gormsqlite "github.com/glebarez/sqlite"
 	"gorm.io/gorm"
@@ -54,7 +55,7 @@ func TestRegressionF01_SamePoolDerivationsShareDatasource(t *testing.T) {
 	}
 
 	err = repo1.WithinTx(context.Background(), func(ctx context.Context) error {
-		return repo2.Create(ctx, &txUser{ID: 7, Version: 0})
+		return repo2.Create(ctx, &txUser{ID: 7, Version: 0}, spec.All())
 	})
 	if err != nil {
 		t.Fatalf("same-pool propagation rejected: %v", err)
@@ -99,7 +100,7 @@ func TestRegressionF01_DistinctPoolsAreRejected(t *testing.T) {
 	}
 
 	err = repoA.WithinTx(context.Background(), func(ctx context.Context) error {
-		return repoB.Create(ctx, &txUser{ID: 8})
+		return repoB.Create(ctx, &txUser{ID: 8}, spec.All())
 	})
 	if err == nil {
 		t.Fatal("cross-pool propagation must be rejected")
@@ -110,7 +111,7 @@ func TestRegressionF01_DistinctPoolsAreRejected(t *testing.T) {
 }
 
 // TestRegressionF01_CheckpointOverSamePoolGormDatabase 验证：gormdb.Database
-//（检查点存储侧）与 gorm ORM 会话（仓储侧）对同一连接池给出相同身份——
+// （检查点存储侧）与 gorm ORM 会话（仓储侧）对同一连接池给出相同身份——
 // 同库检查点保存不再被误判为异源。
 func TestRegressionF01_CheckpointOverSamePoolGormDatabase(t *testing.T) {
 	gdb, err := gorm.Open(

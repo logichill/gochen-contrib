@@ -10,6 +10,7 @@ import (
 	"gochen/contextx"
 	"gochen/db"
 	"gochen/db/orm"
+	"gochen/domain/spec"
 	"gochen/errors"
 
 	gormsqlite "github.com/glebarez/sqlite"
@@ -34,21 +35,23 @@ type userProfile struct {
 }
 
 type txUser struct {
-	ID      int64  `gorm:"primaryKey"`
+	ID      int64  `gorm:"primaryKey" role:"id"`
 	Version uint64 `gorm:"column:version"`
 }
 
-func (u *txUser) GetID() int64       { return u.ID }
-func (u *txUser) GetVersion() uint64 { return u.Version }
+func (u *txUser) GetID() int64        { return u.ID }
+func (u *txUser) GetVersion() uint64  { return u.Version }
+func (u *txUser) SetVersion(v uint64) { u.Version = v }
 
 type reservedColumnEntity struct {
-	ID      int64  `gorm:"primaryKey"`
+	ID      int64  `gorm:"primaryKey" role:"id"`
 	Order   string `gorm:"column:order"`
 	Version uint64 `gorm:"column:version"`
 }
 
-func (e *reservedColumnEntity) GetID() int64       { return e.ID }
-func (e *reservedColumnEntity) GetVersion() uint64 { return e.Version }
+func (e *reservedColumnEntity) GetID() int64        { return e.ID }
+func (e *reservedColumnEntity) GetVersion() uint64  { return e.Version }
+func (e *reservedColumnEntity) SetVersion(v uint64) { e.Version = v }
 
 func setupDB(t *testing.T) *gorm.DB {
 	t.Helper()
@@ -389,7 +392,7 @@ func TestOrmRepoQueryQuotesReservedFilterColumn(t *testing.T) {
 		Value: query.StringValue("first"),
 	})
 
-	got, err := repository.Query(context.Background(), query.QueryOptions{Filters: filters})
+	got, err := repository.Query(context.Background(), query.QueryOptions{Filters: filters}, spec.All())
 	if err != nil {
 		t.Fatalf("Query reserved column: %v", err)
 	}

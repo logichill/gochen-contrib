@@ -7,12 +7,13 @@ import (
 	gormdb "gochen-contrib/data/db/gorm"
 	"gochen-runtime/db/orm/repo"
 	"gochen/db/orm"
+	"gochen/domain/spec"
 
 	"gorm.io/gorm"
 )
 
 type bindBudgetEntity struct {
-	ID   int64
+	ID   int64 `role:"id"`
 	Name string
 }
 
@@ -44,7 +45,7 @@ func TestRepositoryBindBudgetWithEmptyGORMPredicate(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			r, err := repo.NewRepo[*bindBudgetEntity, int64](engine, "users", repo.WithReadPredicate[*bindBudgetEntity, int64](func(context.Context) (orm.Condition, error) { return orm.Condition{Expr: tc.expr, Args: tc.args}, nil }))
+			r, err := repo.NewRepo[*bindBudgetEntity, int64](engine, "users", repo.WithReadPredicate[*bindBudgetEntity, int64](func(context.Context) (orm.Condition, error) { return orm.Condition{Expr: tc.expr, Args: tc.args}, nil }), repo.WithoutVersioning[*bindBudgetEntity, int64]())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -61,7 +62,7 @@ func TestRepositoryBindBudgetWithEmptyGORMPredicate(t *testing.T) {
 			for i := range ids {
 				ids[i] = int64(i + 1)
 			}
-			items, err := r.ListByIds(t.Context(), ids)
+			items, err := r.ListByIds(t.Context(), ids, spec.All())
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -36,7 +36,7 @@ func New(db *gorm.DB) (*Orm, error) {
 			orm.CapabilityQuery,
 			orm.CapabilityPreload,
 			orm.CapabilityAssociationWrite,
-			orm.CapabilityBatchWrite,
+			orm.CapabilityBulkWrite,
 			orm.CapabilityTransaction,
 			orm.CapabilityOptimisticLock,
 		),
