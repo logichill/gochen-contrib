@@ -105,6 +105,8 @@ GOWORK=off go test -tags=integration -count=1 ./db/migrate/gormmigrate
 
 集成测试分别通过 `GOCHEN_MYSQL_DSN`、`GOCHEN_POSTGRES_DSN` 连接测试数据库，创建并清理独立的测试表；未设置对应环境变量时跳过该数据库的用例。
 
+真实仓储共同契约使用 `GOWORK=off go test -tags=integration -race -count=1 ./data/orm/gorm -run '^TestExternalRepositoryContracts$'`，复用 ORM 查询/回滚及领域维度/Transfer 用例。每个 fixture 创建并清理独立 MySQL 数据库或 PostgreSQL schema，测试账号须有相应权限；连接串必须指向测试服务。设置 `GOCHEN_REQUIRE_DATABASE_TESTS=1` 可要求两库均提供连接串。
+
 保存点与事务契约可用 `GOWORK=off go test -race -count=1 -v ./data/db/gorm -run '^TestExternalDialectSavepoints$'` 验证。设置 `GOCHEN_REQUIRE_DATABASE_TESTS=1` 后，缺少连接串会使选中的用例失败，避免 CI 静默跳过。
 
 `.github/workflows/database-contracts.yml` 在临时 PostgreSQL 17.5 / MySQL 8.4 服务上分别执行这些契约。Core、Runtime 按平级目录检出；仓库变量 `GOCHEN_CORE_REF` / `GOCHEN_RUNTIME_REF` 可固定配套版本，留空时使用各仓默认分支。依赖仓为私有仓时，需要配置只读这些仓库的 `GOCHEN_READ_TOKEN` secret。

@@ -68,7 +68,7 @@ jobs:
         with:
           go-version-file: gochen-contrib/go.mod
           cache-dependency-path: gochen-contrib/go.sum
-      - name: Verify savepoint and transaction contracts
+      - name: Verify savepoint, repository, and dimension contracts
         env:
           DATABASE_PORT: ${{ job.services.database.ports[matrix.port] }}
           DATABASE_DIALECT: ${{ matrix.dialect }}
@@ -79,3 +79,4 @@ jobs:
             export GOCHEN_MYSQL_DSN="root:gochen-test@tcp(127.0.0.1:$DATABASE_PORT)/gochen_test?parseTime=true"
           fi
           go test -race -count=1 -timeout=5m -v ./data/db/gorm -run "^TestExternalDialectSavepoints/$DATABASE_DIALECT$"
+          go test -tags=integration -race -count=1 -timeout=5m -v ./data/orm/gorm -run "^TestExternalRepositoryContracts/$DATABASE_DIALECT$"
