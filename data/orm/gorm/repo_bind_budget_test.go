@@ -13,7 +13,7 @@ import (
 )
 
 type bindBudgetEntity struct {
-	ID   int64 `role:"id"`
+	ID   int64 `entity:"id"`
 	Name string
 }
 

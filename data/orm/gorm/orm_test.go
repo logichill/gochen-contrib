@@ -35,7 +35,7 @@ type userProfile struct {
 }
 
 type txUser struct {
-	ID      int64  `gorm:"primaryKey" role:"id"`
+	ID      int64  `gorm:"primaryKey" entity:"id"`
 	Version uint64 `gorm:"column:version"`
 }
 
@@ -44,7 +44,7 @@ func (u *txUser) GetVersion() uint64  { return u.Version }
 func (u *txUser) SetVersion(v uint64) { u.Version = v }
 
 type reservedColumnEntity struct {
-	ID      int64  `gorm:"primaryKey" role:"id"`
+	ID      int64  `gorm:"primaryKey" entity:"id"`
 	Order   string `gorm:"column:order"`
 	Version uint64 `gorm:"column:version"`
 }

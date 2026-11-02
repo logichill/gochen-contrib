@@ -11,7 +11,7 @@ import (
 )
 
 type queryUser struct {
-	ID       int64  `gorm:"primaryKey" role:"id"`
+	ID       int64  `gorm:"primaryKey" entity:"id"`
 	TenantID string `gorm:"column:tenant_id;index"`
 	Name     string `gorm:"column:name"`
 	Version  uint64 `gorm:"column:version"`
