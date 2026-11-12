@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"gochen/errors"
 	"gochen/httpx"
 
 	"github.com/gin-gonic/gin"
@@ -13,6 +14,17 @@ const handlerErrorKey = "gochen.http.handler_error"
 
 // finishRequest 在全部中间件返回后统一处理未被接管的错误。
 func (s *Server) finishRequest(c *gin.Context) {
+	if path := c.FullPath(); path != "" {
+		s.reg.mu.Lock()
+		_, registered := s.reg.sealedRoutes[routeKey{method: c.Request.Method, path: path}]
+		sealed := s.reg.sealed
+		s.reg.mu.Unlock()
+		if sealed && !registered {
+			c.Abort()
+			_ = writeErrorResponse(newContext(s, c), errors.NewCode(errors.FailedPrecondition, "route has no sealed authorization entry"))
+			return
+		}
+	}
 	c.Next()
 	if err := handlerError(c); err != nil {
 		_ = writeErrorResponse(newContext(s, c), err)

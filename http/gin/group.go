@@ -34,6 +34,8 @@ func calculateGinPath(basePath, relativePath string) string {
 }
 
 func (g *routeGroup) registerRoute(method, path string, handler httpx.Handler) {
+	g.server.registrationMu.Lock()
+	defer g.server.registrationMu.Unlock()
 	fullPath := calculateGinPath(g.group.BasePath(), path)
 	if g.server.reg.tryReserve(method, fullPath) {
 		return
@@ -106,6 +108,11 @@ func (g *routeGroup) Group(prefix string) httpx.IRouteGroup {
 
 // Use 为本组后续注册的路由追加中间件。
 func (g *routeGroup) Use(middleware ...httpx.Middleware) httpx.IRouteGroup {
+	g.server.registrationMu.Lock()
+	defer g.server.registrationMu.Unlock()
+	if err := g.server.reg.checkMutable(); err != nil {
+		return g
+	}
 	for _, mw := range middleware {
 		if mw != nil {
 			g.group.Use(g.server.wrapMiddleware(mw))

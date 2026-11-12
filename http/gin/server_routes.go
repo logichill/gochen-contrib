@@ -5,6 +5,12 @@ import (
 )
 
 func (s *Server) registerRoute(method, path string, handler httpx.Handler) {
+	s.registrationMu.Lock()
+	defer s.registrationMu.Unlock()
+	s.registerRouteLocked(method, path, handler)
+}
+
+func (s *Server) registerRouteLocked(method, path string, handler httpx.Handler) {
 	normPath := httpx.NormalizeRoutePath(path)
 	if s.reg.tryReserve(method, normPath) {
 		return
@@ -77,6 +83,11 @@ func (s *Server) Group(prefix string) httpx.IRouteGroup {
 
 // Use 追加 Gin 全局中间件，覆盖后续路由注册以及 NoRoute/NoMethod。
 func (s *Server) Use(middleware ...httpx.Middleware) httpx.IServer {
+	s.registrationMu.Lock()
+	defer s.registrationMu.Unlock()
+	if err := s.reg.checkMutable(); err != nil {
+		return s
+	}
 	for _, mw := range middleware {
 		if mw != nil {
 			s.engine.Use(s.wrapMiddleware(mw))

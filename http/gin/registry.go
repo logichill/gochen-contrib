@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 
+	"gochen/errors"
 	"gochen/httpx"
 )
 
@@ -15,8 +16,11 @@ type routeKey struct {
 }
 
 type routeRegistry struct {
-	mu     sync.Mutex
-	counts map[routeKey]int
+	mu           sync.Mutex
+	counts       map[routeKey]int
+	sealed       bool
+	sealedRoutes map[routeKey]struct{}
+	err          error
 }
 
 func newRouteRegistry() *routeRegistry {
@@ -31,6 +35,10 @@ func (r *routeRegistry) tryReserve(method, path string) bool {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.sealed {
+		r.err = errors.NewCode(errors.FailedPrecondition, "route registration is sealed; assemble and validate a new server")
+		return true
+	}
 	k := routeKey{method: method, path: path}
 	if r.counts[k] > 0 {
 		r.counts[k]++
@@ -38,6 +46,16 @@ func (r *routeRegistry) tryReserve(method, path string) bool {
 	}
 	r.counts[k] = 1
 	return false
+}
+
+func (r *routeRegistry) checkMutable() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.sealed {
+		r.err = errors.NewCode(errors.FailedPrecondition, "route registration is sealed; assemble and validate a new server")
+		return r.err
+	}
+	return nil
 }
 
 func (r *routeRegistry) rollback(method, path string) {

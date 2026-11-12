@@ -26,11 +26,17 @@ type Orm struct {
 
 // New 创建Orm。
 func New(db *gorm.DB) (*Orm, error) {
-	if db == nil {
-		return nil, errors.NewCode(errors.InvalidInput, "gorm db cannot be nil")
+	database, err := gormdb.New(db)
+	if err != nil {
+		return nil, err
 	}
+	return newOrm(db, database), nil
+}
+
+func newOrm(db *gorm.DB, database db.IDatabase) *Orm {
 	return &Orm{
-		db: db,
+		db:       db,
+		database: database,
 		capabilities: orm.NewCapabilities(
 			orm.CapabilityBasicCRUD,
 			orm.CapabilityQuery,
@@ -41,7 +47,7 @@ func New(db *gorm.DB) (*Orm, error) {
 			orm.CapabilityOptimisticLock,
 		),
 		datasourceID: gormDatasourceID(db),
-	}, nil
+	}
 }
 
 // gormDatasourceID 从连接池派生进程内稳定的数据源身份。
@@ -76,12 +82,7 @@ func NewFromDatabase(db db.IDatabase) (*Orm, error) {
 	if !ok || gdb == nil {
 		return nil, errors.NewCode(errors.InvalidInput, "database is not backed by *gorm.DB")
 	}
-	o, err := New(gdb)
-	if err != nil {
-		return nil, err
-	}
-	o.database = db
-	return o, nil
+	return newOrm(gdb, db), nil
 }
 
 // Capabilities 处理Capabilities。

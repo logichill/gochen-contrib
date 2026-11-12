@@ -13,6 +13,8 @@ import (
 
 // Static 挂载静态目录，并应用共享的路径安全规则。
 func (s *Server) Static(prefix, root string) httpx.IServer {
+	s.registrationMu.Lock()
+	defer s.registrationMu.Unlock()
 	p := httpx.NormalizeRoutePath(prefix)
 	if !strings.HasSuffix(p, "/") {
 		p += "/"
@@ -57,14 +59,16 @@ func (s *Server) Static(prefix, root string) httpx.IServer {
 			ctx.SetHeader("Location", location.String())
 			return ctx.String(http.StatusMovedPermanently, "")
 		}
-		s.registerRoute(http.MethodGet, base, redirect)
-		s.registerRoute(http.MethodHead, base, redirect)
+		s.registerRouteLocked(http.MethodGet, base, redirect)
+		s.registerRouteLocked(http.MethodHead, base, redirect)
 	}
 	return s
 }
 
 // ServeStatic 将一个显式指定的文件挂载到 GET/HEAD 路由。
 func (s *Server) ServeStatic(path, root string) {
+	s.registrationMu.Lock()
+	defer s.registrationMu.Unlock()
 	p := httpx.NormalizeRoutePath(path)
 	dupGET := s.reg.tryReserve("GET", p)
 	dupHEAD := s.reg.tryReserve("HEAD", p)

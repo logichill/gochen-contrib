@@ -15,31 +15,42 @@ import (
 )
 
 func TestORMContract(t *testing.T) {
-	contracttest.Run(t, func(t *testing.T) orm.IOrm {
-		gdb, err := gorm.Open(gormsqlite.Open(":memory:"), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
-		if err != nil {
-			t.Fatal(err)
-		}
-		sqlDB, err := gdb.DB()
-		if err != nil {
-			t.Fatal(err)
-		}
-		sqlDB.SetMaxOpenConns(1)
-		t.Cleanup(func() {
-			if err := sqlDB.Close(); err != nil {
-				t.Error(err)
-			}
+	for _, entry := range []string{"connection", "database"} {
+		t.Run(entry, func(t *testing.T) {
+			contracttest.Run(t, func(t *testing.T) orm.IOrm {
+				gdb, err := gorm.Open(gormsqlite.Open(":memory:"), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+				if err != nil {
+					t.Fatal(err)
+				}
+				sqlDB, err := gdb.DB()
+				if err != nil {
+					t.Fatal(err)
+				}
+				sqlDB.SetMaxOpenConns(1)
+				t.Cleanup(func() {
+					if err := sqlDB.Close(); err != nil {
+						t.Error(err)
+					}
+				})
+				if entry == "connection" {
+					adapter, err := New(gdb)
+					if err != nil {
+						t.Fatal(err)
+					}
+					return adapter
+				}
+				database, err := gormdb.New(gdb)
+				if err != nil {
+					t.Fatal(err)
+				}
+				adapter, err := NewFromDatabase(database)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return adapter
+			})
 		})
-		database, err := gormdb.New(gdb)
-		if err != nil {
-			t.Fatal(err)
-		}
-		adapter, err := NewFromDatabase(database)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return adapter
-	})
+	}
 }
 
 type panicCreateRecord struct {

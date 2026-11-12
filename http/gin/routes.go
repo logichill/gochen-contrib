@@ -1,10 +1,74 @@
 package gogin
 
 import (
+	"gochen/errors"
+	"gochen/httpx"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 )
+
+// Routes 使用 Gin Engine 的实际注册表，包含预注册与静态路由。
+func (s *Server) Routes() []httpx.RegisteredRoute {
+	s.registrationMu.Lock()
+	defer s.registrationMu.Unlock()
+	registered := s.engine.Routes()
+	out := make([]httpx.RegisteredRoute, 0, len(registered))
+	for _, route := range registered {
+		out = append(out, httpx.RegisteredRoute{Method: route.Method, Path: route.Path})
+	}
+	return out
+}
+
+// SealRoutes 封存已完成的真实注册；后续修改保持拒绝并记录错误。
+func (s *Server) SealRoutes() error {
+	s.registrationMu.Lock()
+	defer s.registrationMu.Unlock()
+	s.reg.mu.Lock()
+	defer s.reg.mu.Unlock()
+	if s.reg.sealed {
+		s.checkNativeRouteDriftLocked()
+		return s.reg.err
+	}
+	s.reg.sealedRoutes = make(map[routeKey]struct{})
+	for _, route := range s.engine.Routes() {
+		s.reg.sealedRoutes[routeKey{method: route.Method, path: route.Path}] = struct{}{}
+	}
+	s.reg.sealed = true
+	return s.reg.err
+}
+
+// RegistrationError 返回链式注册 API 拒绝修改的错误。
+func (s *Server) RegistrationError() error {
+	s.registrationMu.Lock()
+	defer s.registrationMu.Unlock()
+	s.reg.mu.Lock()
+	defer s.reg.mu.Unlock()
+	if s.reg.sealed {
+		s.checkNativeRouteDriftLocked()
+	}
+	return s.reg.err
+}
+
+// checkNativeRouteDriftLocked 检查原生 Engine 注册是否改变封存清单。
+func (s *Server) checkNativeRouteDriftLocked() {
+	routes := s.engine.Routes()
+	if len(routes) != len(s.reg.sealedRoutes) {
+		s.reg.err = errors.NewCode(errors.FailedPrecondition, "native route registration changed after sealing; assemble and validate a new server")
+		return
+	}
+	for _, route := range routes {
+		if _, ok := s.reg.sealedRoutes[routeKey{method: route.Method, path: route.Path}]; !ok {
+			s.reg.err = errors.NewCode(errors.FailedPrecondition, "native route registration changed after sealing; assemble and validate a new server")
+			return
+		}
+	}
+}
+
+// RoutePath 返回 Gin 实际注册的完整路径。
+func (g *routeGroup) RoutePath(relative string) string {
+	return calculateGinPath(g.group.BasePath(), relative)
+}
 
 // RouteInfo 定义路由信息。
 type RouteInfo struct {

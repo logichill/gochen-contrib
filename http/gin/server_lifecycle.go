@@ -12,6 +12,9 @@ import (
 
 // Start 启动服务。
 func (s *Server) Start(addr string) error {
+	if err := s.RegistrationError(); err != nil {
+		return err
+	}
 	s.lifecycleMu.Lock()
 	if s.stopped {
 		s.lifecycleMu.Unlock()

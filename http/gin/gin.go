@@ -14,12 +14,13 @@ import (
 
 // Server 将 Gin 路由接入 Gochen HTTP 契约，并管理 HTTP 服务生命周期。
 type Server struct {
-	engine      *gin.Engine
-	config      *gochenhttp.WebConfig
-	server      *http.Server
-	reg         *routeRegistry
-	lifecycleMu sync.Mutex
-	stopped     bool
+	engine         *gin.Engine
+	config         *gochenhttp.WebConfig
+	server         *http.Server
+	reg            *routeRegistry
+	lifecycleMu    sync.Mutex
+	registrationMu sync.Mutex
+	stopped        bool
 
 	trustedProxyChecker func(netip.Addr) bool
 }

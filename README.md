@@ -8,21 +8,11 @@
 
 ## 架构定位
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│ 1. gochen (Core 契约)                                       │
-│    - 领域建模、用例编排、事件溯源、总线与端口抽象 (零外部依赖)       │
-└──────────────────────────────┬──────────────────────────────┘
-                               │
-         ┌─────────────────────┴─────────────────────┐
-         ▼                                           ▼
-┌──────────────────────────────┐            ┌──────────────────────────────┐
-│ 2. gochen-runtime (标准运行时)│            │ 3. gochen-contrib (生态外设)  │
-│ - 官方默认、一等公民生产运行时  │            │ - 满足非标准库技术栈选型需求 │
-│ - 纯 Go 标准库打造 (Zero Bloat)│            │ - 按需引入第三方外设驱动     │
-│ - host, nethttp, sql, migrate│            │ - gin, gorm, redis, otel     │
-└──────────────────────────────┘            └──────────────────────────────┘
-```
+| 模块 | 职责 | 依赖 |
+| --- | --- | --- |
+| `gochen` | 领域、应用、授权、事件与端口契约 | 标准库 |
+| `gochen-runtime` | Host、net/http、SQL、配置与迁移实现 | Core；少量物理驱动依赖 |
+| `gochen-contrib` | Gin、GORM、Redis、OTel 等适配器 | Core / Runtime；对应第三方库 |
 
 ---
 
@@ -78,18 +68,34 @@ if err := app.Run(ctx); err != nil {
 ```
 
 ### 2. 将 GORM 注入通用 Repository
+
+以下函数接收已创建的 GORM 连接，并处理 ORM 与 Repository 的构造错误：
+
 ```go
+package example
+
 import (
     gormorm "gochen-contrib/data/orm/gorm"
     ormrepo "gochen-runtime/db/orm/repo"
+    "gochen/domain/crud"
     "gorm.io/gorm"
 )
 
-gormDB, err := gorm.Open(...)
-ormAdapter, err := gormorm.New(gormDB)
+type Order struct {
+    crud.Entity[int64]
+    Name string
+}
 
-repo, err := ormrepo.NewRepo[*Order, int64](ormAdapter, "orders")
+func NewOrders(database *gorm.DB) (*ormrepo.Repo[*Order, int64], error) {
+    adapter, err := gormorm.New(database)
+    if err != nil {
+        return nil, err
+    }
+    return ormrepo.NewRepo[*Order, int64](adapter, "orders")
+}
 ```
+
+`gormorm.New` 自动包装底层 Database，可用于审计 Store 的表结构检查。需要保留已配置的 database 及参数预算时，使用 `gormorm.NewFromDatabase`。租户隔离和授权字段保护在 Repo 构造期显式配置，见 `gochen` 仓库 `docs/architecture/resource-contracts.md`。
 
 ---
 
