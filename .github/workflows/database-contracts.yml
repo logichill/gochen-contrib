@@ -53,14 +53,14 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: ${{ github.repository_owner }}/gochen
-          ref: c17d2d2df1ac18e328e4060b18529328c058ff62 # next 候选 Core，固定真实提交
+          ref: 28ac6f5505bef00b98b859183211469d85f7f52b # next 候选 Core，固定真实提交
           path: gochen
           token: ${{ secrets.GOCHEN_READ_TOKEN || github.token }}
           persist-credentials: false
       - uses: actions/checkout@v4
         with:
           repository: ${{ github.repository_owner }}/gochen-runtime
-          ref: fbd30eabded69bfd352a859a985b4159dc7937d2 # next 候选 Runtime，固定真实提交
+          ref: 5dd14a2a648900296745660b243b46c522b6d300 # next 候选 Runtime，固定真实提交
           path: gochen-runtime
           token: ${{ secrets.GOCHEN_READ_TOKEN || github.token }}
           persist-credentials: false

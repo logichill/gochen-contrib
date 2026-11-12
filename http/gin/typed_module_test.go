@@ -12,6 +12,7 @@ import (
 	gormdb "gochen-contrib/data/db/gorm"
 	gormorm "gochen-contrib/data/orm/gorm"
 	gogin "gochen-contrib/http/gin"
+	"gochen-runtime/api/rest"
 	"gochen-runtime/db/orm/repo"
 	"gochen-runtime/host"
 	"gochen-runtime/host/authz"
@@ -24,6 +25,7 @@ import (
 	"gochen/app/crud"
 	"gochen/auth"
 	domaincrud "gochen/domain/crud"
+	"gochen/errors"
 	"gochen/httpx"
 
 	gormsqlite "github.com/glebarez/sqlite"
@@ -34,6 +36,12 @@ import (
 type moduleNote struct {
 	domaincrud.Entity[string]
 	Title string `json:"title"`
+}
+
+type renameNote struct {
+	ID              string `json:"-"`
+	Title           string `json:"title"`
+	ExpectedVersion uint64 `json:"expected_version"`
 }
 
 type moduleHTTPServer interface {
@@ -87,8 +95,63 @@ func TestTypedModuleGORMHTTPContract(t *testing.T) {
 				if err != nil {
 					return nil, err
 				}
-				return host.Module("notes").Application(application).
-					RouteRegistrar(module.RouteRegistrarFunc(quick.RESTRegistrar[*moduleNote, string](application))).Build()
+				readOptions := crud.Options[*moduleNote, string]{Resource: "note"}
+				readDescriptor, err := crud.Describe(readOptions, false)
+				if err != nil {
+					return nil, err
+				}
+				readOptions.Authorizer, err = auth.Compile(auth.Declaration{Descriptor: readDescriptor, ResourceAccess: auth.ResourceAccessData},
+					auth.CompileOptions{Metadata: repository.ExecutionDescriptor().Metadata(), Checker: authz.NewActionChecker()})
+				if err != nil {
+					return nil, err
+				}
+				readOnly, err := crud.NewReadApplication(repository, readOptions)
+				if err != nil {
+					return nil, err
+				}
+				renameAuth, err := auth.Compile(auth.Declaration{
+					Descriptor:     auth.Descriptor{Resource: "note", Actions: []auth.Action{{Name: "rename", Kind: auth.KindUpdate}}},
+					ResourceAccess: auth.ResourceAccessData,
+				}, auth.CompileOptions{Metadata: repository.ExecutionDescriptor().Metadata(), Checker: authz.NewActionChecker()})
+				if err != nil {
+					return nil, err
+				}
+				rename, err := app.NewCommand(app.CommandOptions[renameNote, *app.CommandRepository[*moduleNote, string], *moduleNote]{
+					Resources: []app.CommandResource[renameNote]{{Name: "note", Repository: repository, Authorizer: renameAuth, Action: "rename",
+						Intent: func(input renameNote) (auth.Request, error) { return auth.Request{IDs: []string{input.ID}}, nil }}},
+					Access: func(_ context.Context, _ renameNote, grants []*app.CommandGrant) (*app.CommandRepository[*moduleNote, string], error) {
+						return app.NewCommandRepository(repository, grants[0])
+					},
+					Handler: func(ctx context.Context, input renameNote, notes *app.CommandRepository[*moduleNote, string]) (*moduleNote, error) {
+						note, err := notes.Get(ctx, input.ID)
+						if err != nil {
+							return nil, err
+						}
+						if note.Version != input.ExpectedVersion {
+							return nil, errors.NewCode(errors.Concurrency, "note version changed")
+						}
+						note.Title = input.Title
+						if err := notes.Update(ctx, note); err != nil {
+							return nil, err
+						}
+						return note, nil
+					},
+				})
+				if err != nil {
+					return nil, err
+				}
+				return host.Module("notes").Binding(
+					rest.Resource[*moduleNote, string](application),
+					rest.Resource[*moduleNote, string](readOnly, rest.WithBasePath[*moduleNote, string]("/browse")),
+					rest.Bind(http.MethodPost, "/commands/:id/rename", rename, func(c httpx.IContext) (renameNote, error) {
+						var input renameNote
+						if err := c.BindJSON(&input); err != nil {
+							return input, err
+						}
+						input.ID = c.Param("id")
+						return input, nil
+					}),
+				).Build()
 			}
 			var server moduleHTTPServer = nethttp.NewServer(nil)
 			if transport == "gin" {
@@ -170,7 +233,24 @@ func TestTypedModuleGORMHTTPContract(t *testing.T) {
 			if note.Title != "second" || note.Version != 1 {
 				t.Fatalf("updated=%+v", note)
 			}
+			request("POST", "/commands/n1/rename", "reader", `{"title":"denied","expected_version":1}`, 403)
+			request("POST", "/commands/n1/rename", "editor", `{"title":"renamed","expected_version":1}`, 200)
+			request("POST", "/commands/n1/rename", "editor", `{"title":"stale","expected_version":1}`, 409)
+			if err := json.Unmarshal(request("GET", "/n1", "reader", "", 200), &note); err != nil {
+				t.Fatal(err)
+			}
+			if note.Title != "renamed" || note.Version != 2 {
+				t.Fatalf("command update=%+v", note)
+			}
 			request("GET", "", "reader", "", 200)
+			request("GET", "/browse", "", "", 401)
+			request("GET", "/browse/n1", "reader", "", 200)
+			request("GET", "/browse", "reader", "", 200)
+			for _, route := range server.(httpx.IRouteSnapshot).Routes() {
+				if strings.Contains(route.Path, "/browse") && route.Method != http.MethodGet && route.Method != http.MethodHead && route.Method != http.MethodOptions {
+					t.Fatalf("read-only binding exposed a write route: %+v", route)
+				}
+			}
 			request("DELETE", "/n1", "editor", "", 200)
 			request("GET", "/n1", "reader", "", 404)
 			if len(entries.Report()) == 0 {
