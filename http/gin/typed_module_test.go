@@ -44,6 +44,24 @@ type renameNote struct {
 	ExpectedVersion uint64 `json:"expected_version"`
 }
 
+// noteRenamer 将业务动作直接建立在既有 CRUD 执行协议上。
+type noteRenamer struct {
+	application *crud.Application[*moduleNote, string]
+}
+
+func (r *noteRenamer) Execute(ctx context.Context, input renameNote) (*moduleNote, error) {
+	return r.application.Execute(ctx, "rename", input.ID, func(_ context.Context, note *moduleNote) error {
+		if note.Version != input.ExpectedVersion {
+			return errors.NewCode(errors.Concurrency, "note version changed")
+		}
+		note.Title = input.Title
+		return nil
+	})
+}
+func (r *noteRenamer) AuthorizationBinding() (auth.EntryBinding, error) {
+	return r.application.AuthorizationBinding("rename")
+}
+
 type moduleHTTPServer interface {
 	httpx.IServer
 	Handler() http.Handler
@@ -90,7 +108,7 @@ func TestTypedModuleGORMHTTPContract(t *testing.T) {
 					return nil, err
 				}
 				application, err = quick.DeclaredApp(repository,
-					crud.Options[*moduleNote, string]{Resource: "note", Limits: app.Limits{MaxPageSize: 10}}, nil,
+					crud.Options[*moduleNote, string]{Resource: "note", Limits: app.Limits{MaxPageSize: 10}, Actions: []auth.Action{{Name: "rename", Kind: auth.KindUpdate}}}, nil,
 					auth.CompileOptions{Checker: authz.NewActionChecker()})
 				if err != nil {
 					return nil, err
@@ -109,37 +127,7 @@ func TestTypedModuleGORMHTTPContract(t *testing.T) {
 				if err != nil {
 					return nil, err
 				}
-				renameAuth, err := auth.Compile(auth.Declaration{
-					Descriptor:     auth.Descriptor{Resource: "note", Actions: []auth.Action{{Name: "rename", Kind: auth.KindUpdate}}},
-					ResourceAccess: auth.ResourceAccessData,
-				}, auth.CompileOptions{Metadata: repository.ExecutionDescriptor().Metadata(), Checker: authz.NewActionChecker()})
-				if err != nil {
-					return nil, err
-				}
-				rename, err := app.NewCommand(app.CommandOptions[renameNote, *app.CommandRepository[*moduleNote, string], *moduleNote]{
-					Resources: []app.CommandResource[renameNote]{{Name: "note", Repository: repository, Authorizer: renameAuth, Action: "rename",
-						Intent: func(input renameNote) (auth.Request, error) { return auth.Request{IDs: []string{input.ID}}, nil }}},
-					Access: func(_ context.Context, _ renameNote, grants []*app.CommandGrant) (*app.CommandRepository[*moduleNote, string], error) {
-						return app.NewCommandRepository(repository, grants[0])
-					},
-					Handler: func(ctx context.Context, input renameNote, notes *app.CommandRepository[*moduleNote, string]) (*moduleNote, error) {
-						note, err := notes.Get(ctx, input.ID)
-						if err != nil {
-							return nil, err
-						}
-						if note.Version != input.ExpectedVersion {
-							return nil, errors.NewCode(errors.Concurrency, "note version changed")
-						}
-						note.Title = input.Title
-						if err := notes.Update(ctx, note); err != nil {
-							return nil, err
-						}
-						return note, nil
-					},
-				})
-				if err != nil {
-					return nil, err
-				}
+				rename := &noteRenamer{application: application}
 				return host.Module("notes").Binding(
 					rest.Resource[*moduleNote, string](application),
 					rest.Resource[*moduleNote, string](readOnly, rest.WithBasePath[*moduleNote, string]("/browse")),
