@@ -108,7 +108,7 @@ func TestTypedModuleGORMHTTPContract(t *testing.T) {
 					return nil, err
 				}
 				application, err = quick.DeclaredApp(repository,
-					crud.Options[*moduleNote, string]{Resource: "note", Limits: app.Limits{MaxPageSize: 10}, Actions: []auth.Action{{Name: "rename", Kind: auth.KindUpdate}}}, nil,
+					crud.Options[*moduleNote, string]{DeleteMode: crud.DeletePurge, Resource: "note", Limits: app.Limits{MaxPageSize: 10}, Actions: []auth.Action{{Name: "rename", Kind: auth.KindUpdate}}}, nil,
 					auth.CompileOptions{Checker: authz.NewActionChecker()})
 				if err != nil {
 					return nil, err

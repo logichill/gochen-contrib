@@ -12,7 +12,6 @@ import (
 	"gochen-runtime/http/nethttp"
 	appcrud "gochen/app/crud"
 	appaudit "gochen/app/crud/audit"
-	"gochen/app/crud/deletion"
 	"gochen/auth"
 	"gochen/contextx"
 	"gochen/domain"
@@ -38,9 +37,7 @@ func TestRESTExplicitCapabilitiesAcrossTransports(t *testing.T) {
 			}
 			repository, err := testkit.NewAuditedMemoryRepository[*capabilityNote, int64](testkit.NewInt64Sequence(1))
 			must(err)
-			application, err := appcrud.NewApplication[*capabilityNote, int64](repository, appcrud.Options[*capabilityNote, int64]{Resource: "note", Authorizer: auth.Allow(), Audit: repository})
-			must(err)
-			trash, err := deletion.NewApplication[*capabilityNote, int64](repository, deletion.Options[*capabilityNote, int64]{Options: appcrud.Options[*capabilityNote, int64]{Resource: "note", Authorizer: auth.Allow(), Audit: repository}})
+			application, err := appcrud.NewApplication[*capabilityNote, int64](repository, appcrud.Options[*capabilityNote, int64]{Resource: "note", Authorizer: auth.Allow(), Audit: repository, DeleteMode: appcrud.DeleteSoft, EnableRestore: true, EnableDeletedQuery: true})
 			must(err)
 			history, err := appaudit.NewReader[int64](repository, repository, appaudit.Options{Resource: "note", Authorizer: auth.Allow()})
 			must(err)
@@ -52,7 +49,7 @@ func TestRESTExplicitCapabilitiesAcrossTransports(t *testing.T) {
 				"wrong resource":  {extract, rest.WithAudit[*capabilityNote, int64](wrong)},
 				"nil audit":       {extract, rest.WithAudit[*capabilityNote, int64](nil)},
 				"duplicate audit": {extract, rest.WithAudit[*capabilityNote, int64](history), rest.WithAudit[*capabilityNote, int64](history)},
-				"nil deletion":    {extract, rest.WithDeletion[*capabilityNote, int64](nil)},
+				"unknown route":   {extract, rest.WithRoutes[*capabilityNote, int64](rest.Op("unknown"))},
 			} {
 				if _, err := rest.NewRouteBuilder(application, options...); err == nil {
 					t.Errorf("%s accepted", name)
@@ -63,7 +60,7 @@ func TestRESTExplicitCapabilitiesAcrossTransports(t *testing.T) {
 				server, err = gogin.New(nil)
 				must(err)
 			}
-			must(rest.Mount(server.Group("/notes"), application, extract, rest.WithAudit[*capabilityNote, int64](history), rest.WithDeletion[*capabilityNote, int64](trash)))
+			must(rest.Mount(server.Group("/notes"), application, extract, rest.WithAudit[*capabilityNote, int64](history), rest.WithRoutes[*capabilityNote, int64](rest.OpList, rest.OpListDeleted, rest.OpCreate, rest.OpCreateBulk, rest.OpUpdateBulk, rest.OpDeleteBulk, rest.OpAuditRead, rest.OpRestore, rest.OpPurge, rest.OpRead, rest.OpUpdate, rest.OpDelete)))
 			ctx, err := contextx.WithOperator(context.Background(), "alice")
 			must(err)
 			must(application.Create(ctx, &capabilityNote{Title: "note"}))

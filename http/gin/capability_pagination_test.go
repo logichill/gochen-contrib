@@ -14,7 +14,6 @@ import (
 	"gochen/app"
 	appcrud "gochen/app/crud"
 	appaudit "gochen/app/crud/audit"
-	"gochen/app/crud/deletion"
 	"gochen/audit"
 	"gochen/auth"
 	"gochen/contextx"
@@ -25,23 +24,20 @@ import (
 func TestRESTCapabilityPaginationAcrossTransports(t *testing.T) {
 	for _, transport := range []string{"nethttp", "gin"} {
 		for _, tc := range []struct {
-			name                        string
-			read, audit, deleted, route int
+			name               string
+			read, audit, route int
 		}{
-			{name: "smaller capabilities", read: 10, audit: 1, deleted: 1, route: 10},
-			{name: "smaller read application", read: 1, audit: 2, deleted: 2, route: 10},
-			{name: "smaller route limit", read: 10, audit: 3, deleted: 3, route: 1},
+			{name: "smaller capabilities", read: 10, audit: 1, route: 10},
+			{name: "smaller read application", read: 1, audit: 2, route: 10},
+			{name: "smaller route limit", read: 10, audit: 3, route: 1},
 		} {
 			t.Run(transport+"/"+tc.name, func(t *testing.T) {
 				ctx, err := contextx.WithOperator(t.Context(), "alice")
 				require.NoError(t, err)
 				repository, err := testkit.NewAuditedMemoryRepository[*capabilityNote, int64](testkit.NewInt64Sequence(1))
 				require.NoError(t, err)
-				options := appcrud.Options[*capabilityNote, int64]{Resource: "note", Authorizer: auth.Allow(), Audit: repository, Limits: app.Limits{MaxPageSize: tc.read}}
+				options := appcrud.Options[*capabilityNote, int64]{Resource: "note", Authorizer: auth.Allow(), Audit: repository, DeleteMode: appcrud.DeleteSoft, EnableDeletedQuery: true, Limits: app.Limits{MaxPageSize: tc.read}}
 				application, err := appcrud.NewApplication(repository, options)
-				require.NoError(t, err)
-				options.Limits.MaxPageSize = tc.deleted
-				trash, err := deletion.NewApplication(repository, deletion.Options[*capabilityNote, int64]{Options: options})
 				require.NoError(t, err)
 				history, err := appaudit.NewReader[int64](repository, repository, appaudit.Options{Resource: "note", Authorizer: auth.Allow(), Limits: app.Limits{MaxPageSize: tc.audit}})
 				require.NoError(t, err)
@@ -54,7 +50,7 @@ func TestRESTCapabilityPaginationAcrossTransports(t *testing.T) {
 							require.NoError(t, application.Update(ctx, entity))
 						}
 					}
-					require.NoError(t, trash.Delete(ctx, entity.GetID()))
+					require.NoError(t, application.Delete(ctx, entity.GetID()))
 				}
 				baselineHistory, err := appaudit.NewReader[int64](repository, repository, appaudit.Options{Resource: "note", Authorizer: auth.Allow(), Limits: app.Limits{MaxPageSize: 100}})
 				require.NoError(t, err)
@@ -62,7 +58,7 @@ func TestRESTCapabilityPaginationAcrossTransports(t *testing.T) {
 				require.NoError(t, err)
 				require.Len(t, allRecords, 6)
 				options.Limits.MaxPageSize = 100
-				baselineTrash, err := deletion.NewApplication(repository, deletion.Options[*capabilityNote, int64]{Options: options})
+				baselineTrash, err := appcrud.NewApplication(repository, options)
 				require.NoError(t, err)
 				allDeleted, err := baselineTrash.ListDeleted(ctx, 0, 100)
 				require.NoError(t, err)
@@ -74,13 +70,13 @@ func TestRESTCapabilityPaginationAcrossTransports(t *testing.T) {
 					require.NoError(t, err)
 				}
 				require.NoError(t, rest.Mount(server.Group("/notes"), application,
-					rest.WithAudit[*capabilityNote, int64](history), rest.WithDeletion[*capabilityNote, int64](trash),
+					rest.WithAudit[*capabilityNote, int64](history), rest.WithRoutes[*capabilityNote, int64](rest.OpList, rest.OpAuditRead, rest.OpListDeleted),
 					rest.WithPagination[*capabilityNote, int64](3, tc.route)))
 
 				for _, size := range []string{"size=3", "page_size=3", ""} {
 					var auditIDs, deletedIDs []int64
 					auditSize := min(3, tc.audit, tc.route)
-					deletedSize := min(3, tc.deleted, tc.route)
+					deletedSize := min(3, tc.read, tc.route)
 					for page := 1; page <= (len(allRecords)+auditSize-1)/auditSize+1; page++ {
 						response := httptest.NewRecorder()
 						path := fmt.Sprintf("/notes/1/audit?page=%d&%s", page, size)

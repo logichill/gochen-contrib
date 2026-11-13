@@ -4,8 +4,8 @@
 
 固定依赖：
 
-- Core：[ed8300c1e9770d55117371c9ef72da4fbdb733a9](https://github.com/logichill/gochen/commit/ed8300c1e9770d55117371c9ef72da4fbdb733a9)
-- Runtime：[6fd641d7f3761cc97ab44abcb1d134d938e3f10a](https://github.com/logichill/gochen-runtime/commit/6fd641d7f3761cc97ab44abcb1d134d938e3f10a)
+- Core：[10409ae4765e75ac0cb1267a2e6dd0cc09300a58](https://github.com/logichill/gochen/commit/10409ae4765e75ac0cb1267a2e6dd0cc09300a58)
+- Runtime：[ffb48d69ebe0a45309e83b08d15616224655fedf](https://github.com/logichill/gochen-runtime/commit/ffb48d69ebe0a45309e83b08d15616224655fedf)
 
 保留原有 dotless module path 和同级开发态 replace，不把 `v0.0.0` 称作已发布版本。三个仓库平级检出，Core/Runtime 分别 checkout 上面 SHA，Contrib checkout 本候选的提交后，在本仓库独立运行：
 
@@ -20,10 +20,12 @@ GOWORK=off go test -race -count=1 ./...
 
 本地 MySQL/PostgreSQL 测试明确跳过：没有提供 `GOCHEN_MYSQL_DSN` / `GOCHEN_POSTGRES_DSN`。SQLite 不能证明这两种真实后端的保存点/数据库语义；现有 `.github/workflows/database-contracts.yml` 会针对固定上游 commit 使用独立 MySQL/PostgreSQL 测试服务。远端 CI 是否成功以本提交的实际运行状态为准，不把“已配置”写成“已通过”。golangci-lint 未执行，云环境未安装该工具。
 
-没有连接生产数据库、执行迁移、发布版本、修改业务项目或合并 main。源码 breaking change 和下游实际接入点见 [Core 迁移说明](https://github.com/logichill/gochen/blob/ed8300c1e9770d55117371c9ef72da4fbdb733a9/docs/guides/core-next-migration.md)。
+没有连接生产数据库、执行迁移、发布版本、修改业务项目或合并 main。源码 breaking change 和下游实际接入点见 [Core 迁移说明](https://github.com/logichill/gochen/blob/10409ae4765e75ac0cb1267a2e6dd0cc09300a58/docs/guides/core-next-migration.md)。
 
-本批业务能力迁移说明：[Core 业务能力与入口绑定](https://github.com/logichill/gochen/blob/ed8300c1e9770d55117371c9ef72da4fbdb733a9/docs/guides/business-capabilities-next.md)。本仓仍未重写生产适配器，只扩充跨适配器合同验收并固定真实上游。
+本批业务能力迁移说明：[Core 业务能力与入口绑定](https://github.com/logichill/gochen/blob/10409ae4765e75ac0cb1267a2e6dd0cc09300a58/docs/guides/business-capabilities-next.md)。本仓仍未重写生产适配器，只扩充跨适配器合同验收并固定真实上游。
 
-完整能力拆分验收新增 `data/orm/gorm/capability_composition_test.go` 和 `http/gin/capability_composition_test.go`：独立 audit-only、delete-only，真实审计 INSERT 后失败的事务回滚，以及两种 HTTP 驱动的独立审计/删除授权与永久删除后历史。生产 Contrib 适配器不需新增包级分叉。
+完整能力拆分验收新增 `data/orm/gorm/capability_composition_test.go` 和 `http/gin/capability_composition_test.go`：不带删除状态的审计资源、无需审计的软删除资源，真实审计 INSERT 后失败的事务回滚，以及两种 HTTP 驱动的独立审计授权、按模式删除权限与永久删除后历史。生产 Contrib 适配器不需新增包级分叉。
 
-授权收敛批次已将 typed Module 的业务入口迁移为具名服务方法，复用受保护 CRUD 应用，不保留旧 Command 兼容层；新增独立审计/删除能力分页上限的 Gin 与 net/http 共同回归。三仓最终独立 build/vet/test/race 均通过（`GOMAXPROCS=2 GOFLAGS=-p=1`）；数据库 CI 固定到上述新的 Core/Runtime 提交，实际结果以本批提交对应运行记录为准。
+授权收敛批次已将 typed Module 的业务入口迁移为具名服务方法，复用受保护 CRUD 应用，不保留旧 Command 兼容层；保留独立审计上限与统一应用回收站分页的 Gin / net/http 共同回归。三仓最终独立 build/vet/test/race 均通过（`GOMAXPROCS=2 GOFLAGS=-p=1`）；数据库 CI 固定到上述新的 Core/Runtime 提交，实际结果以本批提交对应运行记录为准。
+
+最新删除合同要求所有写应用显式配置 `DeleteMode`（DeleteSoft / DeletePurge），未配置失败关闭；取消独立 deletion.Application 和 WithDeletion，恢复/回收站能力与 HTTP 路由分别选择。新增真实 GORM SQLite 模式及安全矩阵：硬模式清除活动/旧软删记录，purge 权限、钩子、审计同源一致；普通创建/更新、回调和 Before/Validator 不得绕过生命周期改变删除状态，批量违规整体回滚。仍未改写生产适配器、迁移业务下游或操作生产数据库。
